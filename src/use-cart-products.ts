@@ -35,7 +35,12 @@ async function fetchProductCatalog(apiBaseUrl: string, domain: string): Promise<
       if (!res.ok) throw new Error(`Products API ${res.status}`);
       return res.json();
     })
-    .then((json: { products?: unknown[] }) => json.products ?? [])
+    .then((json: { products?: unknown[] }) => {
+      const data = json.products ?? [];
+      // Write data BEFORE .finally clears the promise
+      productCache.set(cacheKey, { data, timestamp: Date.now() });
+      return data;
+    })
     .finally(() => {
       const entry = productCache.get(cacheKey);
       if (entry) productCache.set(cacheKey, { ...entry, promise: undefined });
@@ -47,9 +52,7 @@ async function fetchProductCatalog(apiBaseUrl: string, domain: string): Promise<
     promise,
   });
 
-  const data = await promise;
-  productCache.set(cacheKey, { data, timestamp: Date.now() });
-  return data;
+  return promise;
 }
 
 export function useCartProducts(domain: string): {
@@ -73,6 +76,8 @@ export function useCartProducts(domain: string): {
   const slugKey = items.map(i => `${i.slug}${i.variantId ?? ''}`).sort().join(',');
 
   useEffect(() => {
+    let cancelled = false;
+
     if (items.length === 0) {
       setProducts([]);
       setError(null);
@@ -83,6 +88,7 @@ export function useCartProducts(domain: string): {
 
     fetchProductCatalog(apiBaseUrl, domain)
       .then(allProducts => {
+        if (cancelled) return;
         const liveMap = new Map(
           (allProducts as Array<{ slug: string }>).map(p => [p.slug, p])
         );
@@ -120,10 +126,15 @@ export function useCartProducts(domain: string): {
         setError(null);
       })
       .catch(err => {
+        if (cancelled) return;
         setError(err instanceof Error ? err : new Error(String(err)));
         setProducts([]);
       })
-      .finally(() => setIsLoading(false));
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slugKey, apiBaseUrl, domain]);
 
