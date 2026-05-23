@@ -1,3 +1,5 @@
+'use client';
+
 // src/cart-context.tsx
 import {
   createContext,
