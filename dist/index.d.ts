@@ -43,6 +43,23 @@ interface CartContextValue {
     closeCart: () => void;
     toggleCart: () => void;
 }
+interface CartSuggestionProduct {
+    id: string;
+    slug: string;
+    name: string;
+    price: number;
+    salePrice: number | null;
+    image: string | null;
+}
+type CartSuggestionType = 'bundle_upgrade' | 'upsell' | 'cross_sell' | 'fallback';
+interface CartSuggestion {
+    type: CartSuggestionType;
+    product: CartSuggestionProduct;
+    sourceProductSlug?: string;
+    bundleItemSlugs?: string[];
+    savingsAmount?: number;
+    savingsPercent?: number;
+}
 
 interface CartProviderProps {
     children: ReactNode;
@@ -63,4 +80,11 @@ declare function useCartProducts(domain: string): {
     error: Error | null;
 };
 
-export { type CartContextValue, type CartItem, type CartProduct, CartProvider, type ProductVariant, useCart, useCartProducts };
+declare function useCartSuggestions(domain: string): {
+    suggestions: CartSuggestion[];
+    isLoading: boolean;
+    error: Error | null;
+    applySuggestion: (s: CartSuggestion) => void;
+};
+
+export { type CartContextValue, type CartItem, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type ProductVariant, useCart, useCartProducts, useCartSuggestions };

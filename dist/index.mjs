@@ -273,8 +273,87 @@ function useCartProducts(domain) {
   }, [slugKey, apiBaseUrl, domain]);
   return { products, isLoading, error };
 }
+
+// src/use-cart-suggestions.ts
+import { useContext as useContext3, useEffect as useEffect3, useState as useState3, useCallback as useCallback2 } from "react";
+var suggestionCache = /* @__PURE__ */ new Map();
+var CACHE_TTL_MS2 = 6e4;
+async function fetchSuggestions(apiBaseUrl, domain, productSlugs) {
+  const slugParam = productSlugs.join(",");
+  const cacheKey = `${apiBaseUrl}::${domain}::${slugParam}`;
+  const cached = suggestionCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && !cached.promise && now - cached.timestamp < CACHE_TTL_MS2) {
+    return cached.data;
+  }
+  if (cached?.promise) {
+    return cached.promise;
+  }
+  const promise = fetch(
+    `${apiBaseUrl}/api/public/cart/suggestions?domain=${encodeURIComponent(domain)}&productSlugs=${encodeURIComponent(slugParam)}`
+  ).then((res) => {
+    if (!res.ok) throw new Error(`Cart suggestions API ${res.status}`);
+    return res.json();
+  }).then((json) => {
+    const data = json.suggestions ?? [];
+    suggestionCache.set(cacheKey, { data, timestamp: Date.now() });
+    return data;
+  }).finally(() => {
+    const entry = suggestionCache.get(cacheKey);
+    if (entry) suggestionCache.set(cacheKey, { ...entry, promise: void 0 });
+  });
+  suggestionCache.set(cacheKey, {
+    data: cached?.data ?? [],
+    timestamp: cached?.timestamp ?? 0,
+    promise
+  });
+  return promise;
+}
+function useCartSuggestions(domain) {
+  const cartCtx = useContext3(CartContext);
+  const config = useContext3(CartConfigContext);
+  if (!cartCtx) throw new Error("useCartSuggestions must be used inside <CartProvider>");
+  const { items, addItem, removeItem } = cartCtx;
+  const { apiBaseUrl } = config;
+  const [suggestions, setSuggestions] = useState3([]);
+  const [isLoading, setIsLoading] = useState3(false);
+  const [error, setError] = useState3(null);
+  const productSlugs = Array.from(new Set(items.map((i) => i.slug))).sort();
+  const slugKey = productSlugs.join(",");
+  useEffect3(() => {
+    let cancelled = false;
+    if (productSlugs.length === 0) {
+      setSuggestions([]);
+      setError(null);
+      return;
+    }
+    setIsLoading(true);
+    fetchSuggestions(apiBaseUrl, domain, productSlugs).then((data) => {
+      if (cancelled) return;
+      setSuggestions(data);
+      setError(null);
+    }).catch((err) => {
+      if (cancelled) return;
+      setError(err instanceof Error ? err : new Error(String(err)));
+      setSuggestions([]);
+    }).finally(() => {
+      if (!cancelled) setIsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [slugKey, apiBaseUrl, domain]);
+  const applySuggestion = useCallback2((s) => {
+    if (s.type === "bundle_upgrade" && s.sourceProductSlug) {
+      removeItem(s.sourceProductSlug);
+    }
+    addItem(s.product.slug);
+  }, [addItem, removeItem]);
+  return { suggestions, isLoading, error, applySuggestion };
+}
 export {
   CartProvider,
   useCart,
-  useCartProducts
+  useCartProducts,
+  useCartSuggestions
 };

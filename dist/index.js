@@ -23,7 +23,8 @@ var index_exports = {};
 __export(index_exports, {
   CartProvider: () => CartProvider,
   useCart: () => useCart,
-  useCartProducts: () => useCartProducts
+  useCartProducts: () => useCartProducts,
+  useCartSuggestions: () => useCartSuggestions
 });
 module.exports = __toCommonJS(index_exports);
 
@@ -293,9 +294,88 @@ function useCartProducts(domain) {
   }, [slugKey, apiBaseUrl, domain]);
   return { products, isLoading, error };
 }
+
+// src/use-cart-suggestions.ts
+var import_react3 = require("react");
+var suggestionCache = /* @__PURE__ */ new Map();
+var CACHE_TTL_MS2 = 6e4;
+async function fetchSuggestions(apiBaseUrl, domain, productSlugs) {
+  const slugParam = productSlugs.join(",");
+  const cacheKey = `${apiBaseUrl}::${domain}::${slugParam}`;
+  const cached = suggestionCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && !cached.promise && now - cached.timestamp < CACHE_TTL_MS2) {
+    return cached.data;
+  }
+  if (cached?.promise) {
+    return cached.promise;
+  }
+  const promise = fetch(
+    `${apiBaseUrl}/api/public/cart/suggestions?domain=${encodeURIComponent(domain)}&productSlugs=${encodeURIComponent(slugParam)}`
+  ).then((res) => {
+    if (!res.ok) throw new Error(`Cart suggestions API ${res.status}`);
+    return res.json();
+  }).then((json) => {
+    const data = json.suggestions ?? [];
+    suggestionCache.set(cacheKey, { data, timestamp: Date.now() });
+    return data;
+  }).finally(() => {
+    const entry = suggestionCache.get(cacheKey);
+    if (entry) suggestionCache.set(cacheKey, { ...entry, promise: void 0 });
+  });
+  suggestionCache.set(cacheKey, {
+    data: cached?.data ?? [],
+    timestamp: cached?.timestamp ?? 0,
+    promise
+  });
+  return promise;
+}
+function useCartSuggestions(domain) {
+  const cartCtx = (0, import_react3.useContext)(CartContext);
+  const config = (0, import_react3.useContext)(CartConfigContext);
+  if (!cartCtx) throw new Error("useCartSuggestions must be used inside <CartProvider>");
+  const { items, addItem, removeItem } = cartCtx;
+  const { apiBaseUrl } = config;
+  const [suggestions, setSuggestions] = (0, import_react3.useState)([]);
+  const [isLoading, setIsLoading] = (0, import_react3.useState)(false);
+  const [error, setError] = (0, import_react3.useState)(null);
+  const productSlugs = Array.from(new Set(items.map((i) => i.slug))).sort();
+  const slugKey = productSlugs.join(",");
+  (0, import_react3.useEffect)(() => {
+    let cancelled = false;
+    if (productSlugs.length === 0) {
+      setSuggestions([]);
+      setError(null);
+      return;
+    }
+    setIsLoading(true);
+    fetchSuggestions(apiBaseUrl, domain, productSlugs).then((data) => {
+      if (cancelled) return;
+      setSuggestions(data);
+      setError(null);
+    }).catch((err) => {
+      if (cancelled) return;
+      setError(err instanceof Error ? err : new Error(String(err)));
+      setSuggestions([]);
+    }).finally(() => {
+      if (!cancelled) setIsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [slugKey, apiBaseUrl, domain]);
+  const applySuggestion = (0, import_react3.useCallback)((s) => {
+    if (s.type === "bundle_upgrade" && s.sourceProductSlug) {
+      removeItem(s.sourceProductSlug);
+    }
+    addItem(s.product.slug);
+  }, [addItem, removeItem]);
+  return { suggestions, isLoading, error, applySuggestion };
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   CartProvider,
   useCart,
-  useCartProducts
+  useCartProducts,
+  useCartSuggestions
 });

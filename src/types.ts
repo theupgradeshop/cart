@@ -60,3 +60,23 @@ export interface CartState {
 export interface CartConfig {
   apiBaseUrl: string;
 }
+
+export interface CartSuggestionProduct {
+  id: string;
+  slug: string;
+  name: string;
+  price: number;
+  salePrice: number | null;
+  image: string | null;
+}
+
+export type CartSuggestionType = 'bundle_upgrade' | 'upsell' | 'cross_sell' | 'fallback';
+
+export interface CartSuggestion {
+  type: CartSuggestionType;
+  product: CartSuggestionProduct;
+  sourceProductSlug?: string;
+  bundleItemSlugs?: string[];
+  savingsAmount?: number;
+  savingsPercent?: number;
+}
