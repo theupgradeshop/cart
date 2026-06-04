@@ -80,3 +80,8 @@ export interface CartSuggestion {
   savingsAmount?: number;
   savingsPercent?: number;
 }
+
+export interface CartSuggestionsResponse {
+  style: string;
+  suggestions: CartSuggestion[];
+}

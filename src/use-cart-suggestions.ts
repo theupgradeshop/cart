@@ -3,9 +3,10 @@ import { CartSuggestion } from './types';
 import { CartContext, CartConfigContext } from './cart-context';
 
 interface CacheEntry {
+  style: string;
   data: CartSuggestion[];
   timestamp: number;
-  promise?: Promise<CartSuggestion[]>;
+  promise?: Promise<{ style: string; suggestions: CartSuggestion[] }>;
 }
 
 /**
@@ -20,14 +21,14 @@ async function fetchSuggestions(
   apiBaseUrl: string,
   domain: string,
   productSlugs: string[]
-): Promise<CartSuggestion[]> {
+): Promise<{ style: string; suggestions: CartSuggestion[] }> {
   const slugParam = productSlugs.join(',');
   const cacheKey = `${apiBaseUrl}::${domain}::${slugParam}`;
   const cached = suggestionCache.get(cacheKey);
   const now = Date.now();
 
   if (cached && !cached.promise && now - cached.timestamp < CACHE_TTL_MS) {
-    return cached.data;
+    return { style: cached.style, suggestions: cached.data };
   }
 
   // In-flight deduplication
@@ -42,11 +43,12 @@ async function fetchSuggestions(
       if (!res.ok) throw new Error(`Cart suggestions API ${res.status}`);
       return res.json();
     })
-    .then((json: { suggestions?: CartSuggestion[] }) => {
-      const data = json.suggestions ?? [];
+    .then((json: { style?: string; suggestions?: CartSuggestion[] }) => {
+      const style = json.style ?? 'sidebar';
+      const suggestions = json.suggestions ?? [];
       // Write data BEFORE .finally clears the promise
-      suggestionCache.set(cacheKey, { data, timestamp: Date.now() });
-      return data;
+      suggestionCache.set(cacheKey, { style, data: suggestions, timestamp: Date.now() });
+      return { style, suggestions };
     })
     .finally(() => {
       const entry = suggestionCache.get(cacheKey);
@@ -54,6 +56,7 @@ async function fetchSuggestions(
     });
 
   suggestionCache.set(cacheKey, {
+    style: cached?.style ?? 'sidebar',
     data: cached?.data ?? [],
     timestamp: cached?.timestamp ?? 0,
     promise,
@@ -64,6 +67,7 @@ async function fetchSuggestions(
 
 export function useCartSuggestions(domain: string): {
   suggestions: CartSuggestion[];
+  suggestionsStyle: string;
   isLoading: boolean;
   error: Error | null;
   applySuggestion: (s: CartSuggestion) => void;
@@ -77,6 +81,7 @@ export function useCartSuggestions(domain: string): {
   const { apiBaseUrl } = config;
 
   const [suggestions, setSuggestions] = useState<CartSuggestion[]>([]);
+  const [suggestionsStyle, setSuggestionsStyle] = useState<string>('sidebar');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -89,6 +94,7 @@ export function useCartSuggestions(domain: string): {
 
     if (productSlugs.length === 0) {
       setSuggestions([]);
+      setSuggestionsStyle('sidebar');
       setError(null);
       return;
     }
@@ -96,9 +102,10 @@ export function useCartSuggestions(domain: string): {
     setIsLoading(true);
 
     fetchSuggestions(apiBaseUrl, domain, productSlugs)
-      .then(data => {
+      .then(({ style, suggestions: data }) => {
         if (cancelled) return;
         setSuggestions(data);
+        setSuggestionsStyle(style);
         setError(null);
       })
       .catch(err => {
@@ -126,5 +133,5 @@ export function useCartSuggestions(domain: string): {
     addItem(s.product.slug);
   }, [addItem, removeItem]);
 
-  return { suggestions, isLoading, error, applySuggestion };
+  return { suggestions, suggestionsStyle, isLoading, error, applySuggestion };
 }

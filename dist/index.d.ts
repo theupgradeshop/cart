@@ -60,6 +60,10 @@ interface CartSuggestion {
     savingsAmount?: number;
     savingsPercent?: number;
 }
+interface CartSuggestionsResponse {
+    style: string;
+    suggestions: CartSuggestion[];
+}
 
 interface CartProviderProps {
     children: ReactNode;
@@ -82,9 +86,10 @@ declare function useCartProducts(domain: string): {
 
 declare function useCartSuggestions(domain: string): {
     suggestions: CartSuggestion[];
+    suggestionsStyle: string;
     isLoading: boolean;
     error: Error | null;
     applySuggestion: (s: CartSuggestion) => void;
 };
 
-export { type CartContextValue, type CartItem, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type ProductVariant, useCart, useCartProducts, useCartSuggestions };
+export { type CartContextValue, type CartItem, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type CartSuggestionsResponse, type ProductVariant, useCart, useCartProducts, useCartSuggestions };

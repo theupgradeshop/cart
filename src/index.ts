@@ -10,4 +10,5 @@ export type {
   CartSuggestion,
   CartSuggestionProduct,
   CartSuggestionType,
+  CartSuggestionsResponse,
 } from './types';

@@ -305,7 +305,7 @@ async function fetchSuggestions(apiBaseUrl, domain, productSlugs) {
   const cached = suggestionCache.get(cacheKey);
   const now = Date.now();
   if (cached && !cached.promise && now - cached.timestamp < CACHE_TTL_MS2) {
-    return cached.data;
+    return { style: cached.style, suggestions: cached.data };
   }
   if (cached?.promise) {
     return cached.promise;
@@ -316,14 +316,16 @@ async function fetchSuggestions(apiBaseUrl, domain, productSlugs) {
     if (!res.ok) throw new Error(`Cart suggestions API ${res.status}`);
     return res.json();
   }).then((json) => {
-    const data = json.suggestions ?? [];
-    suggestionCache.set(cacheKey, { data, timestamp: Date.now() });
-    return data;
+    const style = json.style ?? "sidebar";
+    const suggestions = json.suggestions ?? [];
+    suggestionCache.set(cacheKey, { style, data: suggestions, timestamp: Date.now() });
+    return { style, suggestions };
   }).finally(() => {
     const entry = suggestionCache.get(cacheKey);
     if (entry) suggestionCache.set(cacheKey, { ...entry, promise: void 0 });
   });
   suggestionCache.set(cacheKey, {
+    style: cached?.style ?? "sidebar",
     data: cached?.data ?? [],
     timestamp: cached?.timestamp ?? 0,
     promise
@@ -337,6 +339,7 @@ function useCartSuggestions(domain) {
   const { items, addItem, removeItem } = cartCtx;
   const { apiBaseUrl } = config;
   const [suggestions, setSuggestions] = (0, import_react3.useState)([]);
+  const [suggestionsStyle, setSuggestionsStyle] = (0, import_react3.useState)("sidebar");
   const [isLoading, setIsLoading] = (0, import_react3.useState)(false);
   const [error, setError] = (0, import_react3.useState)(null);
   const productSlugs = Array.from(new Set(items.map((i) => i.slug))).sort();
@@ -345,13 +348,15 @@ function useCartSuggestions(domain) {
     let cancelled = false;
     if (productSlugs.length === 0) {
       setSuggestions([]);
+      setSuggestionsStyle("sidebar");
       setError(null);
       return;
     }
     setIsLoading(true);
-    fetchSuggestions(apiBaseUrl, domain, productSlugs).then((data) => {
+    fetchSuggestions(apiBaseUrl, domain, productSlugs).then(({ style, suggestions: data }) => {
       if (cancelled) return;
       setSuggestions(data);
+      setSuggestionsStyle(style);
       setError(null);
     }).catch((err) => {
       if (cancelled) return;
@@ -371,7 +376,7 @@ function useCartSuggestions(domain) {
     }
     addItem(s.product.slug);
   }, [addItem, removeItem]);
-  return { suggestions, isLoading, error, applySuggestion };
+  return { suggestions, suggestionsStyle, isLoading, error, applySuggestion };
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
