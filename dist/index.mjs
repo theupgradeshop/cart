@@ -344,8 +344,9 @@ function useCartSuggestions(domain) {
     };
   }, [slugKey, apiBaseUrl, domain]);
   const applySuggestion = useCallback2((s) => {
-    if (s.type === "bundle_upgrade" && s.sourceProductSlug) {
-      removeItem(s.sourceProductSlug);
+    if (s.type === "bundle_upgrade") {
+      const toRemove = s.bundleItemSlugs?.length ? s.bundleItemSlugs : s.sourceProductSlug ? [s.sourceProductSlug] : [];
+      toRemove.forEach((slug) => removeItem(slug));
     }
     addItem(s.product.slug);
   }, [addItem, removeItem]);
