@@ -1,6 +1,6 @@
 {
   "name": "@upgradeshop/cart",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "description": "ID-only cart state management with live price fetching for Upgrade Shop customer websites",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
