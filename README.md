@@ -83,6 +83,19 @@ the add. See the comment on `autoAddedSlugsRef` in
 `src/use-cart-prerequisites.ts` and the loop-guard test in
 `tests/use-cart-prerequisites.test.tsx`.
 
+**Measured, not assumed: without this guard, the failure is bounded, not
+runaway.** An implementer removed the guard and counted rather than
+speculating — the result was exactly **two** `addItem` calls for a given slug,
+not an infinite loop. The reason is the effect's dependency, `slugKey`, built
+from `Array.from(new Set(items.map(i => i.slug))).sort()` — a **deduped**
+sorted slug set. The first add changes that set (triggering one re-run of the
+effect), but re-adding a slug already present in the cart does not change the
+set again, so the effect does not fire a third time. **The guard is still
+required**: two of a product a buyer never chose is a real defect on its own,
+and the bound above only covers a single missing slug — several distinct
+missing prerequisites, or a timing race between overlapping fetches, are the
+cases the guard actually protects against.
+
 Uses `productSlugs` (not `productIds`) against the endpoint, since the cart
 only ever holds slugs — see the endpoint's own file header
 (`src/app/api/public/cart/prerequisites/route.ts`, dashboard repo) for why
