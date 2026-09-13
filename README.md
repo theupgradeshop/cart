@@ -34,24 +34,41 @@ Checks the cart's contents against `POST /api/public/cart/prerequisites`
 the cart, surfacing what it added so the consuming site can render a notice.
 
 ```ts
-const { missing, autoAdded, isLoading, error } = useCartPrerequisites(domain, buyerEmail);
+const { missing, autoAdded, dependencies, isLoading, error } = useCartPrerequisites(domain, buyerEmail);
 ```
 
 - `missing` — every `{ product, prerequisite }` pair the endpoint currently
   reports as unsatisfied (product summaries: `{ id, name, slug, price,
   images }`).
 - `autoAdded` — the subset of `missing` this hook has actually added to the
-  cart during this mounted instance. Render a notice off this, naming the
-  prerequisite and why it appeared — **this hook never blocks**, it only adds
-  and reports.
+  cart during this mounted instance. **This does not survive a remount** —
+  it resets to `[]` on the next page load or navigation even though the
+  prerequisite it added is still sitting in the cart, so it cannot answer
+  "why is this in my cart" after a reload. Kept because it is still correct
+  for the same-mount case (the notice a buyer sees right after the add
+  happens).
+- `dependencies` — one entry per product already in the cart whose required
+  prerequisite is ALSO in the cart, `{ product, prerequisite }` where
+  `product` is the dependent item and `prerequisite` is what it requires.
+  This is a catalogue relation computed by the server from the cart's
+  current contents on every request, not a record of who added what — so,
+  unlike `autoAdded`, it is populated the same way on every mount, including
+  after a reload or a fresh page load at checkout. **Render the "why is this
+  here" notice off `dependencies`, not `autoAdded`**, for anything that must
+  survive navigation. Never feeds `addItem` — it is derived from what's
+  already in the cart, so surfacing it can't create a loop.
 - Calls `addItem(prerequisite.slug, 1)` from the cart context itself — it
   does not require the consumer to wire anything beyond rendering the result.
+  This only ever happens off `missing`; `dependencies` never triggers an add.
 
 **Never a hard blocker.** The platform's own checkout
 (`POST /api/public/checkout`) is the authoritative gate and independently
 refuses an order with a genuinely missing prerequisite — this hook is
 storefront UX only, so it fails open on any error (non-ok response, thrown
-fetch, malformed body): `missing: []`, `autoAdded: []`, no add, no throw. See
+fetch, malformed body): `missing: []`, `autoAdded: []`, `dependencies: []`, no
+add, no throw. A response body from an older platform build that omits the
+`dependencies` key entirely is treated the same way — `dependencies: []`,
+nothing throws. See
 `wiki/cross-cutting/customer-site-parent-addon-gate.md` for the end-to-end
 mechanism and why failing open here is safe.
 

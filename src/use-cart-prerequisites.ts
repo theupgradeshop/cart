@@ -14,10 +14,15 @@ export interface MissingPrerequisite {
   prerequisite: PrerequisiteProduct;
 }
 
+interface PrerequisitesResult {
+  missing: MissingPrerequisite[];
+  dependencies: MissingPrerequisite[];
+}
+
 interface CacheEntry {
-  data: MissingPrerequisite[];
+  data: PrerequisitesResult;
   timestamp: number;
-  promise?: Promise<MissingPrerequisite[]>;
+  promise?: Promise<PrerequisitesResult>;
 }
 
 /**
@@ -25,6 +30,10 @@ interface CacheEntry {
  * Survives React StrictMode double-mount and cart drawer open/close cycles.
  * In-flight deduplication prevents duplicate simultaneous requests.
  * Same shape as useCartProducts / useCartSuggestions.
+ *
+ * One entry holds BOTH `missing` and `dependencies` — they come off the same
+ * response body, so there is exactly one request, one cache key and one TTL
+ * for the pair. Never split these into separate fetches/caches.
  */
 const prerequisiteCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 60_000;
@@ -34,7 +43,7 @@ async function fetchPrerequisites(
   domain: string,
   productSlugs: string[],
   buyerEmail?: string
-): Promise<MissingPrerequisite[]> {
+): Promise<PrerequisitesResult> {
   const slugParam = productSlugs.join(',');
   const cacheKey = `${apiBaseUrl}::${domain}::${slugParam}::${buyerEmail ?? ''}`;
   const cached = prerequisiteCache.get(cacheKey);
@@ -62,8 +71,13 @@ async function fetchPrerequisites(
       if (!res.ok) throw new Error(`Cart prerequisites API ${res.status}`);
       return res.json();
     })
-    .then((json: { missing?: MissingPrerequisite[] }) => {
-      const data = json.missing ?? [];
+    .then((json: { missing?: MissingPrerequisite[]; dependencies?: MissingPrerequisite[] }) => {
+      // `dependencies` is missing from an older platform build — default to
+      // [] so this hook never breaks against a not-yet-upgraded endpoint.
+      const data: PrerequisitesResult = {
+        missing: json.missing ?? [],
+        dependencies: json.dependencies ?? [],
+      };
       // Write data BEFORE .finally clears the promise
       prerequisiteCache.set(cacheKey, { data, timestamp: Date.now() });
       return data;
@@ -74,7 +88,7 @@ async function fetchPrerequisites(
     });
 
   prerequisiteCache.set(cacheKey, {
-    data: cached?.data ?? [],
+    data: cached?.data ?? { missing: [], dependencies: [] },
     timestamp: cached?.timestamp ?? 0,
     promise,
   });
@@ -88,6 +102,7 @@ export function useCartPrerequisites(
 ): {
   missing: MissingPrerequisite[];
   autoAdded: MissingPrerequisite[];
+  dependencies: MissingPrerequisite[];
   isLoading: boolean;
   error: Error | null;
 } {
@@ -100,7 +115,15 @@ export function useCartPrerequisites(
   const { apiBaseUrl } = config;
 
   const [missing, setMissing] = useState<MissingPrerequisite[]>([]);
+  // `autoAdded` only ever reflects an add THIS mounted instance performed —
+  // it is empty again on every fresh mount (reload, page navigation), so it
+  // cannot explain a prerequisite that a PRIOR mount added. `dependencies`
+  // is the value that survives a remount: it is recomputed from the cart's
+  // current contents on every mount, server-side, so "why is this in my
+  // cart" still has an answer after a reload even though `autoAdded` is
+  // reset to []. Render the reason off `dependencies`, not `autoAdded`.
   const [autoAdded, setAutoAdded] = useState<MissingPrerequisite[]>([]);
+  const [dependencies, setDependencies] = useState<MissingPrerequisite[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -128,6 +151,7 @@ export function useCartPrerequisites(
     if (productSlugs.length === 0) {
       setMissing([]);
       setAutoAdded([]);
+      setDependencies([]);
       setError(null);
       return;
     }
@@ -135,11 +159,15 @@ export function useCartPrerequisites(
     setIsLoading(true);
 
     fetchPrerequisites(apiBaseUrl, domain, productSlugs, buyerEmail)
-      .then(data => {
+      .then(({ missing: data, dependencies: deps }) => {
         if (cancelled) return;
         setMissing(data);
+        setDependencies(deps);
         setError(null);
 
+        // `dependencies` is a catalogue relation, never an input to the
+        // auto-add loop or its guard — only `missing` (what the endpoint
+        // says is still absent from the cart) ever drives addItem.
         const toAdd = data.filter(
           entry => !autoAddedSlugsRef.current.has(entry.prerequisite.slug)
         );
@@ -161,6 +189,7 @@ export function useCartPrerequisites(
         // outright — see wiki/cross-cutting/customer-site-parent-addon-gate.md.
         setError(err instanceof Error ? err : new Error(String(err)));
         setMissing([]);
+        setDependencies([]);
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -170,5 +199,5 @@ export function useCartPrerequisites(
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slugKey, apiBaseUrl, domain, buyerEmail]);
 
-  return { missing, autoAdded, isLoading, error };
+  return { missing, autoAdded, dependencies, isLoading, error };
 }

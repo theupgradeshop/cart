@@ -21,9 +21,24 @@ const productSummary = {
   images: [],
 };
 
+const dependentSummary = {
+  id: 'dependent-id',
+  name: 'Dependent Product',
+  slug: 'dependent-product',
+  price: 75,
+  images: [],
+};
+
 function makeMissingResponse() {
   return {
     missing: [{ product: productSummary, prerequisite: prereqSummary }],
+  };
+}
+
+function makeDependenciesResponse() {
+  return {
+    missing: [],
+    dependencies: [{ product: dependentSummary, prerequisite: prereqSummary }],
   };
 }
 
@@ -177,5 +192,106 @@ describe('useCartPrerequisites', () => {
     // up here as quantity > 1.
     expect(prereqItem?.quantity).toBe(1);
     expect(result.current.prereq.autoAdded).toHaveLength(1);
+  });
+
+  it('DEPENDENCIES: a response carrying both missing and dependencies exposes dependencies without auto-adding them', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        missing: [{ product: productSummary, prerequisite: prereqSummary }],
+        dependencies: [{ product: dependentSummary, prerequisite: prereqSummary }],
+      }),
+    } as Response);
+
+    const { result } = renderHook(
+      () => ({ cart: useCart(), prereq: useCartPrerequisites('test-deps.com') }),
+      { wrapper: makeWrapper('deps-mixed') }
+    );
+
+    act(() => { result.current.cart.addItem('product-a', 1); });
+
+    await waitFor(() => expect(result.current.prereq.isLoading).toBe(false));
+
+    expect(result.current.prereq.dependencies).toEqual([
+      { product: dependentSummary, prerequisite: prereqSummary },
+    ]);
+    // Only `missing`'s entry drove an add — `dependencies` never does.
+    // The prereq item's quantity would exceed 1 if the dependencies entry
+    // (which shares the same prerequisite slug) had also triggered an add.
+    const prereqItem = result.current.cart.items.find(i => i.slug === 'prereq-product');
+    expect(prereqItem?.quantity).toBe(1);
+    expect(result.current.cart.items.some(i => i.slug === 'dependent-product')).toBe(false);
+  });
+
+  it('DEPENDENCIES: empty missing with populated dependencies — no add fires at all', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => makeDependenciesResponse(),
+    } as Response);
+
+    const { result } = renderHook(
+      () => ({ cart: useCart(), prereq: useCartPrerequisites('test-deps-only.com') }),
+      { wrapper: makeWrapper('deps-only') }
+    );
+
+    act(() => { result.current.cart.addItem('dependent-product', 1); });
+
+    await waitFor(() => expect(result.current.prereq.isLoading).toBe(false));
+
+    expect(result.current.prereq.missing).toEqual([]);
+    expect(result.current.prereq.dependencies).toEqual([
+      { product: dependentSummary, prerequisite: prereqSummary },
+    ]);
+    expect(result.current.prereq.autoAdded).toEqual([]);
+    // Only the caller's own explicit add — nothing auto-added.
+    expect(result.current.cart.items).toEqual([{ slug: 'dependent-product', quantity: 1 }]);
+  });
+
+  it('DEPENDENCIES: a response with no dependencies key at all yields dependencies: [] and does not throw', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => makeMissingResponse(), // no `dependencies` key
+    } as Response);
+
+    const { result } = renderHook(
+      () => ({ cart: useCart(), prereq: useCartPrerequisites('test-no-deps-key.com') }),
+      { wrapper: makeWrapper('no-deps-key') }
+    );
+
+    act(() => { result.current.cart.addItem('product-a', 1); });
+
+    await waitFor(() => expect(result.current.prereq.isLoading).toBe(false));
+
+    expect(() => result.current.prereq.dependencies).not.toThrow();
+    expect(result.current.prereq.dependencies).toEqual([]);
+  });
+
+  it('DEPENDENCIES: missing and dependencies share ONE request — a slug-set change fetches exactly once', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => makeDependenciesResponse(),
+    } as Response);
+
+    const { result } = renderHook(
+      () => ({ cart: useCart(), prereq: useCartPrerequisites('test-one-fetch.com') }),
+      { wrapper: makeWrapper('one-fetch-per-change') }
+    );
+
+    act(() => { result.current.cart.addItem('product-a', 1); });
+    await waitFor(() => expect(result.current.prereq.isLoading).toBe(false));
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    // Adding a second, distinct slug changes the slug-set → one more fetch,
+    // not two (one for `missing`, one for `dependencies`) — they are read
+    // off the SAME response.
+    act(() => { result.current.cart.addItem('another-product', 1); });
+    await waitFor(() => expect(result.current.prereq.isLoading).toBe(false));
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    // Same slug-set again (a re-render/quantity bump) — served from cache,
+    // no additional fetch at all.
+    act(() => { result.current.cart.addItem('another-product', 1); });
+    await waitFor(() => expect(result.current.prereq.isLoading).toBe(false));
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });

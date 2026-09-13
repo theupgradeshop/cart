@@ -23,6 +23,7 @@ var index_exports = {};
 __export(index_exports, {
   CartProvider: () => CartProvider,
   useCart: () => useCart,
+  useCartPrerequisites: () => useCartPrerequisites,
   useCartProducts: () => useCartProducts,
   useCartSuggestions: () => useCartSuggestions
 });
@@ -378,10 +379,109 @@ function useCartSuggestions(domain) {
   }, [addItem, removeItem]);
   return { suggestions, suggestionsStyle, isLoading, error, applySuggestion };
 }
+
+// src/use-cart-prerequisites.ts
+var import_react4 = require("react");
+var prerequisiteCache = /* @__PURE__ */ new Map();
+var CACHE_TTL_MS3 = 6e4;
+async function fetchPrerequisites(apiBaseUrl, domain, productSlugs, buyerEmail) {
+  const slugParam = productSlugs.join(",");
+  const cacheKey = `${apiBaseUrl}::${domain}::${slugParam}::${buyerEmail ?? ""}`;
+  const cached = prerequisiteCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && !cached.promise && now - cached.timestamp < CACHE_TTL_MS3) {
+    return cached.data;
+  }
+  if (cached?.promise) {
+    return cached.promise;
+  }
+  const promise = fetch(`${apiBaseUrl}/api/public/cart/prerequisites`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      domain,
+      productSlugs,
+      ...buyerEmail ? { buyerEmail } : {}
+    })
+  }).then((res) => {
+    if (!res.ok) throw new Error(`Cart prerequisites API ${res.status}`);
+    return res.json();
+  }).then((json) => {
+    const data = {
+      missing: json.missing ?? [],
+      dependencies: json.dependencies ?? []
+    };
+    prerequisiteCache.set(cacheKey, { data, timestamp: Date.now() });
+    return data;
+  }).finally(() => {
+    const entry = prerequisiteCache.get(cacheKey);
+    if (entry) prerequisiteCache.set(cacheKey, { ...entry, promise: void 0 });
+  });
+  prerequisiteCache.set(cacheKey, {
+    data: cached?.data ?? { missing: [], dependencies: [] },
+    timestamp: cached?.timestamp ?? 0,
+    promise
+  });
+  return promise;
+}
+function useCartPrerequisites(domain, buyerEmail) {
+  const cartCtx = (0, import_react4.useContext)(CartContext);
+  const config = (0, import_react4.useContext)(CartConfigContext);
+  if (!cartCtx) throw new Error("useCartPrerequisites must be used inside <CartProvider>");
+  const { items, addItem } = cartCtx;
+  const { apiBaseUrl } = config;
+  const [missing, setMissing] = (0, import_react4.useState)([]);
+  const [autoAdded, setAutoAdded] = (0, import_react4.useState)([]);
+  const [dependencies, setDependencies] = (0, import_react4.useState)([]);
+  const [isLoading, setIsLoading] = (0, import_react4.useState)(false);
+  const [error, setError] = (0, import_react4.useState)(null);
+  const autoAddedSlugsRef = (0, import_react4.useRef)(/* @__PURE__ */ new Set());
+  const productSlugs = Array.from(new Set(items.map((i) => i.slug))).sort();
+  const slugKey = productSlugs.join(",");
+  (0, import_react4.useEffect)(() => {
+    let cancelled = false;
+    if (productSlugs.length === 0) {
+      setMissing([]);
+      setAutoAdded([]);
+      setDependencies([]);
+      setError(null);
+      return;
+    }
+    setIsLoading(true);
+    fetchPrerequisites(apiBaseUrl, domain, productSlugs, buyerEmail).then(({ missing: data, dependencies: deps }) => {
+      if (cancelled) return;
+      setMissing(data);
+      setDependencies(deps);
+      setError(null);
+      const toAdd = data.filter(
+        (entry) => !autoAddedSlugsRef.current.has(entry.prerequisite.slug)
+      );
+      if (toAdd.length > 0) {
+        toAdd.forEach((entry) => {
+          autoAddedSlugsRef.current.add(entry.prerequisite.slug);
+          addItem(entry.prerequisite.slug, 1);
+        });
+        setAutoAdded((prev) => [...prev, ...toAdd]);
+      }
+    }).catch((err) => {
+      if (cancelled) return;
+      setError(err instanceof Error ? err : new Error(String(err)));
+      setMissing([]);
+      setDependencies([]);
+    }).finally(() => {
+      if (!cancelled) setIsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [slugKey, apiBaseUrl, domain, buyerEmail]);
+  return { missing, autoAdded, dependencies, isLoading, error };
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   CartProvider,
   useCart,
+  useCartPrerequisites,
   useCartProducts,
   useCartSuggestions
 });

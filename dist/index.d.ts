@@ -92,4 +92,23 @@ declare function useCartSuggestions(domain: string): {
     applySuggestion: (s: CartSuggestion) => void;
 };
 
-export { type CartContextValue, type CartItem, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type CartSuggestionsResponse, type ProductVariant, useCart, useCartProducts, useCartSuggestions };
+interface PrerequisiteProduct {
+    id: string;
+    name: string;
+    slug: string;
+    price: number;
+    images: unknown;
+}
+interface MissingPrerequisite {
+    product: PrerequisiteProduct;
+    prerequisite: PrerequisiteProduct;
+}
+declare function useCartPrerequisites(domain: string, buyerEmail?: string): {
+    missing: MissingPrerequisite[];
+    autoAdded: MissingPrerequisite[];
+    dependencies: MissingPrerequisite[];
+    isLoading: boolean;
+    error: Error | null;
+};
+
+export { type CartContextValue, type CartItem, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type CartSuggestionsResponse, type MissingPrerequisite, type PrerequisiteProduct, type ProductVariant, useCart, useCartPrerequisites, useCartProducts, useCartSuggestions };
