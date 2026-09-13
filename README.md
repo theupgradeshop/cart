@@ -34,7 +34,7 @@ Checks the cart's contents against `POST /api/public/cart/prerequisites`
 the cart, surfacing what it added so the consuming site can render a notice.
 
 ```ts
-const { missing, autoAdded, dependencies, isLoading, error } = useCartPrerequisites(domain, buyerEmail);
+const { missing, autoAdded, dependencies, dependentsOf, isLoading, error } = useCartPrerequisites(domain, buyerEmail);
 ```
 
 - `missing` — every `{ product, prerequisite }` pair the endpoint currently
@@ -57,6 +57,18 @@ const { missing, autoAdded, dependencies, isLoading, error } = useCartPrerequisi
   here" notice off `dependencies`, not `autoAdded`**, for anything that must
   survive navigation. Never feeds `addItem` — it is derived from what's
   already in the cart, so surfacing it can't create a loop.
+- `dependentsOf(slug)` — answers "if `slug` left the cart, which lines would
+  lose their prerequisite?": the `product` side of every `dependencies` entry
+  whose `prerequisite.slug` matches, deduplicated by product id, `[]` for a
+  slug nothing depends on (including one that doesn't exist). Pure and
+  derived from `dependencies` alone — no fetch, no extra state — and stable
+  across re-renders that don't change `dependencies` (`useCallback`), so it's
+  safe in a dependency array. **This is for a consumer to warn before
+  removing a line that something else in the cart requires** — e.g. call it
+  with the slug about to be removed before calling `removeItem`, and if it
+  returns a non-empty array, confirm with the buyer (naming the dependants)
+  before proceeding. This hook does not build that UI or call `removeItem`
+  itself.
 - Calls `addItem(prerequisite.slug, 1)` from the cart context itself — it
   does not require the consumer to wire anything beyond rendering the result.
   This only ever happens off `missing`; `dependencies` never triggers an add.

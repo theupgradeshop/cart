@@ -107,6 +107,7 @@ declare function useCartPrerequisites(domain: string, buyerEmail?: string): {
     missing: MissingPrerequisite[];
     autoAdded: MissingPrerequisite[];
     dependencies: MissingPrerequisite[];
+    dependentsOf: (slug: string) => PrerequisiteProduct[];
     isLoading: boolean;
     error: Error | null;
 };

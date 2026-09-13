@@ -475,7 +475,21 @@ function useCartPrerequisites(domain, buyerEmail) {
       cancelled = true;
     };
   }, [slugKey, apiBaseUrl, domain, buyerEmail]);
-  return { missing, autoAdded, dependencies, isLoading, error };
+  const dependentsOf = (0, import_react4.useCallback)(
+    (slug) => {
+      const seenIds = /* @__PURE__ */ new Set();
+      const dependents = [];
+      for (const entry of dependencies) {
+        if (entry.prerequisite.slug !== slug) continue;
+        if (seenIds.has(entry.product.id)) continue;
+        seenIds.add(entry.product.id);
+        dependents.push(entry.product);
+      }
+      return dependents;
+    },
+    [dependencies]
+  );
+  return { missing, autoAdded, dependencies, dependentsOf, isLoading, error };
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

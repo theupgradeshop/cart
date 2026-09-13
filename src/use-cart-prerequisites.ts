@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { CartContext, CartConfigContext } from './cart-context';
 
 export interface PrerequisiteProduct {
@@ -103,6 +103,7 @@ export function useCartPrerequisites(
   missing: MissingPrerequisite[];
   autoAdded: MissingPrerequisite[];
   dependencies: MissingPrerequisite[];
+  dependentsOf: (slug: string) => PrerequisiteProduct[];
   isLoading: boolean;
   error: Error | null;
 } {
@@ -199,5 +200,30 @@ export function useCartPrerequisites(
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slugKey, apiBaseUrl, domain, buyerEmail]);
 
-  return { missing, autoAdded, dependencies, isLoading, error };
+  // Answers "if `slug` left the cart, which lines would lose their
+  // prerequisite?" — the `product` side of every `dependencies` entry whose
+  // `prerequisite.slug` matches. Pure and derived from `dependencies` alone
+  // (no fetch, no extra state); `useCallback` keyed on `dependencies` keeps
+  // the identity stable across re-renders that don't change it, so a
+  // consumer can put it in an effect/memo dependency array without causing
+  // a render loop — the same hazard the auto-add loop guard above exists
+  // for. Deduplicated by product id, in case a catalogue names the same
+  // pair more than once. Never throws; an unknown or unrelated slug yields
+  // `[]`.
+  const dependentsOf = useCallback(
+    (slug: string): PrerequisiteProduct[] => {
+      const seenIds = new Set<string>();
+      const dependents: PrerequisiteProduct[] = [];
+      for (const entry of dependencies) {
+        if (entry.prerequisite.slug !== slug) continue;
+        if (seenIds.has(entry.product.id)) continue;
+        seenIds.add(entry.product.id);
+        dependents.push(entry.product);
+      }
+      return dependents;
+    },
+    [dependencies]
+  );
+
+  return { missing, autoAdded, dependencies, dependentsOf, isLoading, error };
 }

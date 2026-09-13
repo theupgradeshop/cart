@@ -294,4 +294,101 @@ describe('useCartPrerequisites', () => {
     await waitFor(() => expect(result.current.prereq.isLoading).toBe(false));
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  describe('dependentsOf', () => {
+    const dependentSummary2 = {
+      id: 'dependent-id-2',
+      name: 'Second Dependent Product',
+      slug: 'dependent-product-2',
+      price: 90,
+      images: [],
+    };
+
+    it('returns the dependent for a prerequisite slug named in `dependencies`', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => makeDependenciesResponse(),
+      } as Response);
+
+      const { result } = renderHook(
+        () => ({ cart: useCart(), prereq: useCartPrerequisites('test-dependents-of.com') }),
+        { wrapper: makeWrapper('dependents-of-basic') }
+      );
+
+      act(() => { result.current.cart.addItem('dependent-product', 1); });
+      await waitFor(() => expect(result.current.prereq.isLoading).toBe(false));
+
+      expect(result.current.prereq.dependentsOf('prereq-product')).toEqual([dependentSummary]);
+    });
+
+    it('returns [] for a slug nothing depends on, and for an unknown slug — never throws', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => makeDependenciesResponse(),
+      } as Response);
+
+      const { result } = renderHook(
+        () => ({ cart: useCart(), prereq: useCartPrerequisites('test-dependents-of-empty.com') }),
+        { wrapper: makeWrapper('dependents-of-empty') }
+      );
+
+      act(() => { result.current.cart.addItem('dependent-product', 1); });
+      await waitFor(() => expect(result.current.prereq.isLoading).toBe(false));
+
+      // A real prerequisite slug that nothing in this response depends on.
+      expect(() => result.current.prereq.dependentsOf('dependent-product')).not.toThrow();
+      expect(result.current.prereq.dependentsOf('dependent-product')).toEqual([]);
+      // A slug that doesn't exist anywhere in this cart/catalogue at all.
+      expect(() => result.current.prereq.dependentsOf('no-such-slug')).not.toThrow();
+      expect(result.current.prereq.dependentsOf('no-such-slug')).toEqual([]);
+    });
+
+    it('returns both dependants of one prerequisite, and dedupes the same pair reported twice', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          missing: [],
+          dependencies: [
+            { product: dependentSummary, prerequisite: prereqSummary },
+            { product: dependentSummary2, prerequisite: prereqSummary },
+            // Same pair as the first entry, reported a second time.
+            { product: dependentSummary, prerequisite: prereqSummary },
+          ],
+        }),
+      } as Response);
+
+      const { result } = renderHook(
+        () => ({ cart: useCart(), prereq: useCartPrerequisites('test-dependents-of-multi.com') }),
+        { wrapper: makeWrapper('dependents-of-multi') }
+      );
+
+      act(() => { result.current.cart.addItem('dependent-product', 1); });
+      await waitFor(() => expect(result.current.prereq.isLoading).toBe(false));
+
+      const dependents = result.current.prereq.dependentsOf('prereq-product');
+      expect(dependents).toHaveLength(2);
+      expect(dependents).toEqual(
+        expect.arrayContaining([dependentSummary, dependentSummary2])
+      );
+    });
+
+    it('keeps the same function identity across a re-render that does not change `dependencies`', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => makeDependenciesResponse(),
+      } as Response);
+
+      const { result, rerender } = renderHook(
+        () => ({ cart: useCart(), prereq: useCartPrerequisites('test-dependents-of-stable.com') }),
+        { wrapper: makeWrapper('dependents-of-stable') }
+      );
+
+      act(() => { result.current.cart.addItem('dependent-product', 1); });
+      await waitFor(() => expect(result.current.prereq.isLoading).toBe(false));
+
+      const firstIdentity = result.current.prereq.dependentsOf;
+      rerender();
+      expect(result.current.prereq.dependentsOf).toBe(firstIdentity);
+    });
+  });
 });

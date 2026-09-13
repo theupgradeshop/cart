@@ -359,7 +359,7 @@ function useCartSuggestions(domain) {
 }
 
 // src/use-cart-prerequisites.ts
-import { useContext as useContext4, useEffect as useEffect4, useRef, useState as useState4 } from "react";
+import { useCallback as useCallback3, useContext as useContext4, useEffect as useEffect4, useRef, useState as useState4 } from "react";
 var prerequisiteCache = /* @__PURE__ */ new Map();
 var CACHE_TTL_MS3 = 6e4;
 async function fetchPrerequisites(apiBaseUrl, domain, productSlugs, buyerEmail) {
@@ -453,7 +453,21 @@ function useCartPrerequisites(domain, buyerEmail) {
       cancelled = true;
     };
   }, [slugKey, apiBaseUrl, domain, buyerEmail]);
-  return { missing, autoAdded, dependencies, isLoading, error };
+  const dependentsOf = useCallback3(
+    (slug) => {
+      const seenIds = /* @__PURE__ */ new Set();
+      const dependents = [];
+      for (const entry of dependencies) {
+        if (entry.prerequisite.slug !== slug) continue;
+        if (seenIds.has(entry.product.id)) continue;
+        seenIds.add(entry.product.id);
+        dependents.push(entry.product);
+      }
+      return dependents;
+    },
+    [dependencies]
+  );
+  return { missing, autoAdded, dependencies, dependentsOf, isLoading, error };
 }
 export {
   CartProvider,
