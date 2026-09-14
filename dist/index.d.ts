@@ -129,4 +129,49 @@ declare function useCartPrerequisites(domain: string, buyerEmail?: string): {
     error: Error | null;
 };
 
-export { type CartContextValue, type CartItem, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type CartSuggestionsResponse, type MissingPrerequisite, type PrerequisiteProduct, type ProductVariant, useCart, useCartPrerequisites, useCartProducts, useCartSuggestions };
+/** Shape of a successful `POST /api/public/store/bundle-rules/price` response. */
+interface CartBundlePriceResult {
+    totalMinor: number;
+    discountMinor: number;
+    appliedRuleId: string | null;
+    appliedRuleName: string | null;
+    basis: unknown;
+    suppressionReason: string | null;
+}
+type CartBundlePriceEntry = {
+    status: 'not-composed';
+} | {
+    status: 'unpriceable';
+    reason: string;
+} | {
+    status: 'not-loaded';
+} | {
+    status: 'priced';
+    result: CartBundlePriceResult;
+};
+/**
+ * Fetches a server-computed price for every cart line carrying a `composition` (an edited
+ * bundle line — see `CartItemComposition` in `src/types.ts`), from
+ * `POST /api/public/store/bundle-rules/price`.
+ *
+ * A cart with no composed line issues NO request at all — this is deliberate, not an
+ * optimization: an account that never touches bundles must not acquire a network call on
+ * every cart render. Read-only: never calls `addItem` or `removeItem`.
+ *
+ * `priceFor(slug, variantId?)` looks up a line's price by its cart identity (the same
+ * `slug`+`variantId` key `cart-reducer.ts` uses):
+ * - `{ status: 'not-composed' }` — the line has no `composition`, or doesn't exist.
+ * - `{ status: 'unpriceable', reason }` — the composition has an included item with
+ *   `quantity > 1`; see the evaluator limitation above. No request was made for it.
+ * - `{ status: 'not-loaded' }` — priceable, but the request hasn't resolved yet (or the
+ *   last attempt failed — fail-open, so a failure looks the same as "still pending" and never
+ *   renders a stale or partial figure).
+ * - `{ status: 'priced', result }` — a server-computed price is available.
+ */
+declare function useCartBundlePrice(domain: string): {
+    priceFor: (slug: string, variantId?: string) => CartBundlePriceEntry;
+    isLoading: boolean;
+    error: Error | null;
+};
+
+export { type CartBundlePriceEntry, type CartBundlePriceResult, type CartContextValue, type CartItem, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type CartSuggestionsResponse, type MissingPrerequisite, type PrerequisiteProduct, type ProductVariant, useCart, useCartBundlePrice, useCartPrerequisites, useCartProducts, useCartSuggestions };

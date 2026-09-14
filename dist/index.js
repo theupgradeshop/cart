@@ -23,6 +23,7 @@ var index_exports = {};
 __export(index_exports, {
   CartProvider: () => CartProvider,
   useCart: () => useCart,
+  useCartBundlePrice: () => useCartBundlePrice,
   useCartPrerequisites: () => useCartPrerequisites,
   useCartProducts: () => useCartProducts,
   useCartSuggestions: () => useCartSuggestions
@@ -501,10 +502,128 @@ function useCartPrerequisites(domain, buyerEmail) {
   );
   return { missing, autoAdded, dependencies, dependentsOf, isLoading, error };
 }
+
+// src/use-cart-bundle-price.ts
+var import_react5 = require("react");
+var UNPRICEABLE_REASON = "The bundle-rules price evaluator has no quantity field (ChosenItem is { id, listPriceMinor, owned }) \u2014 every chosen item prices as a single unit. A composition with an included item quantity greater than 1 would silently under-price if requested as-is, so no price is requested or shown for it until the evaluator becomes quantity-aware.";
+var bundlePriceCache = /* @__PURE__ */ new Map();
+var CACHE_TTL_MS4 = 6e4;
+function hasQuantityAboveOne(includedItems) {
+  return includedItems.some((i) => i.quantity > 1);
+}
+function compositionKey(bundleSlug, includedItems) {
+  const itemsPart = includedItems.map((i) => `${i.slug}:${i.quantity}`).sort().join(",");
+  return `${bundleSlug}::${itemsPart}`;
+}
+async function fetchBundlePrice(apiBaseUrl, domain, composition) {
+  const cacheKey = `${apiBaseUrl}::${domain}::${compositionKey(composition.bundleSlug, composition.includedItems)}`;
+  const cached = bundlePriceCache.get(cacheKey);
+  const now = Date.now();
+  if (cached?.data && !cached.promise && now - cached.timestamp < CACHE_TTL_MS4) {
+    return cached.data;
+  }
+  if (cached?.promise) {
+    return cached.promise;
+  }
+  const productSlugs = composition.includedItems.map((i) => i.slug);
+  const promise = fetch(`${apiBaseUrl}/api/public/store/bundle-rules/price`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ domain, productSlugs })
+  }).then((res) => {
+    if (!res.ok) throw new Error(`Bundle price API ${res.status}`);
+    return res.json();
+  }).then((json) => {
+    const data = {
+      totalMinor: json.totalMinor ?? 0,
+      discountMinor: json.discountMinor ?? 0,
+      appliedRuleId: json.appliedRuleId ?? null,
+      appliedRuleName: json.appliedRuleName ?? null,
+      basis: json.basis ?? null,
+      suppressionReason: json.suppressionReason ?? null
+    };
+    bundlePriceCache.set(cacheKey, { data, timestamp: Date.now() });
+    return data;
+  }).finally(() => {
+    const entry = bundlePriceCache.get(cacheKey);
+    if (entry) bundlePriceCache.set(cacheKey, { ...entry, promise: void 0 });
+  });
+  bundlePriceCache.set(cacheKey, {
+    data: cached?.data,
+    timestamp: cached?.timestamp ?? 0,
+    promise
+  });
+  return promise;
+}
+function useCartBundlePrice(domain) {
+  const cartCtx = (0, import_react5.useContext)(CartContext);
+  const config = (0, import_react5.useContext)(CartConfigContext);
+  if (!cartCtx) throw new Error("useCartBundlePrice must be used inside <CartProvider>");
+  const { items } = cartCtx;
+  const { apiBaseUrl } = config;
+  const priceableLines = items.filter(
+    (i) => i.composition && !hasQuantityAboveOne(i.composition.includedItems)
+  );
+  const [results, setResults] = (0, import_react5.useState)(/* @__PURE__ */ new Map());
+  const [loadingKeys, setLoadingKeys] = (0, import_react5.useState)(/* @__PURE__ */ new Set());
+  const [error, setError] = (0, import_react5.useState)(null);
+  const compKey = priceableLines.map((i) => compositionKey(i.composition.bundleSlug, i.composition.includedItems)).sort().join("|");
+  (0, import_react5.useEffect)(() => {
+    let cancelled = false;
+    if (priceableLines.length === 0) {
+      setLoadingKeys(/* @__PURE__ */ new Set());
+      return;
+    }
+    const byContent = /* @__PURE__ */ new Map();
+    for (const item of priceableLines) {
+      const key = compositionKey(item.composition.bundleSlug, item.composition.includedItems);
+      if (!byContent.has(key)) byContent.set(key, item.composition);
+    }
+    setLoadingKeys(new Set(byContent.keys()));
+    for (const [key, composition] of byContent) {
+      fetchBundlePrice(apiBaseUrl, domain, composition).then((data) => {
+        if (cancelled) return;
+        setResults((prev) => {
+          const next = new Map(prev);
+          next.set(key, data);
+          return next;
+        });
+        setError(null);
+      }).catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err : new Error(String(err)));
+      }).finally(() => {
+        if (cancelled) return;
+        setLoadingKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [compKey, apiBaseUrl, domain]);
+  const priceFor = (slug, variantId) => {
+    const key = itemKey(slug, variantId);
+    const line = items.find((i) => itemKey(i.slug, i.variantId) === key);
+    if (!line?.composition) return { status: "not-composed" };
+    if (hasQuantityAboveOne(line.composition.includedItems)) {
+      return { status: "unpriceable", reason: UNPRICEABLE_REASON };
+    }
+    const contentKey = compositionKey(line.composition.bundleSlug, line.composition.includedItems);
+    const result = results.get(contentKey);
+    if (result) return { status: "priced", result };
+    return { status: "not-loaded" };
+  };
+  return { priceFor, isLoading: loadingKeys.size > 0, error };
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   CartProvider,
   useCart,
+  useCartBundlePrice,
   useCartPrerequisites,
   useCartProducts,
   useCartSuggestions

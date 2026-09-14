@@ -37,8 +37,9 @@ nothing about the schema guarantees that stays true, so the shape has to
 express it from the start rather than needing a second migration later.
 
 This unit (U6.1) only lands the shape and its backward compatibility —
-nothing yet writes a `composition`. Building a bundle editor or pricing a
-composed bundle is out of scope here.
+nothing yet writes a `composition`. Building a bundle editor is still out of
+scope; **U6.2 (`useCartBundlePrice`, below) adds read-only pricing for a line
+that already carries one.**
 
 ## Exports
 
@@ -52,6 +53,7 @@ composed bundle is out of scope here.
   `GET /api/public/cart/suggestions`, plus `applySuggestion`.
 - `useCartPrerequisites(domain, buyerEmail?)` (`src/use-cart-prerequisites.ts`)
   — see below.
+- `useCartBundlePrice(domain)` (`src/use-cart-bundle-price.ts`) — see below.
 
 All hooks must be used inside a `<CartProvider>` and throw if they aren't.
 
@@ -141,6 +143,81 @@ only ever holds slugs — see the endpoint's own file header
 (`src/app/api/public/cart/prerequisites/route.ts`, dashboard repo) for why
 both forms exist and why slugs are the right choice for a `CartItem`-keyed
 caller.
+
+## `useCartBundlePrice(domain)` (U6.2)
+
+Fetches a server-computed price for every cart line that carries a
+`composition` (see `CartItem.composition` above) from
+`POST /api/public/store/bundle-rules/price`. Read-only — it never calls
+`addItem` or `removeItem`.
+
+```ts
+const { priceFor, isLoading, error } = useCartBundlePrice(domain);
+const entry = priceFor(item.slug, item.variantId);
+```
+
+**A cart with no composed line issues no request at all.** This is
+deliberate, not an incidental optimization — an account that never touches
+bundles must not acquire a network call on every cart render. Only lines
+whose `composition` is present are ever included in a fetch.
+
+`priceFor(slug, variantId?)` looks a line up by its cart identity — the same
+`slug`/`variantId` key `cart-reducer.ts`'s `itemKey` uses — and returns one
+of:
+
+- `{ status: 'not-composed' }` — the line has no `composition`, or no line
+  with that identity exists.
+- `{ status: 'unpriceable', reason }` — **the refusal.** See below.
+- `{ status: 'not-loaded' }` — priceable, but the request hasn't resolved
+  yet. A prior failed attempt for this exact composition also reports this
+  state (fail-open — see below), so "still pending" and "last attempt
+  failed" are intentionally indistinguishable from the outside: neither ever
+  shows a price.
+- `{ status: 'priced', result }` — a server-computed price is available:
+  `result` is `{ totalMinor, discountMinor, appliedRuleId, appliedRuleName,
+  basis, suppressionReason }`, passed straight through from the endpoint.
+
+**The refusal — read this before touching the quantity check.** The pricing
+engine behind this endpoint (`src/lib/store/bundle-rule-evaluator.ts` in the
+dashboard) is **quantity-blind**: its `ChosenItem` type is `{ id,
+listPriceMinor, owned }` — the word `quantity` does not appear anywhere in
+that file, and the price route builds one `ChosenItem` per product row
+regardless of how many units a composition asks for. A `CartItemComposition`
+*can* express an included item with `quantity` greater than one. Sending such
+a composition to this endpoint as-is would price it as though every item
+were a single unit — **a total lower than what the buyer will actually be
+charged.**
+
+So: if any `includedItems` entry in a composition has `quantity > 1`, this
+hook makes **no** request for it and reports `{ status: 'unpriceable',
+reason }` instead — never a stale or partial figure. This is a deliberate
+fail-closed stopgap on a money path, not an oversight; the evaluator gap
+itself is filed in `cowork/backlog/commerce-payments.md`. **Do not remove
+this refusal without first making the evaluator quantity-aware, and do not
+work around it by computing a price client-side** — the evaluator (rule
+selection, discount math, suppression) is the only place that can price a
+bundle rule correctly.
+
+**Fail open**, same register as `useCartPrerequisites`: a non-ok response, a
+thrown fetch, or an unparseable body all resolve to no price and no thrown
+error (`error` is set on the hook's return value, but nothing blocks and
+nothing renders a partial result). A failed attempt is not cached, so the
+next composition-set change retries it.
+
+**Caching/dedup**: keyed by `apiBaseUrl` + `domain` + the composition's
+`bundleSlug` + its `includedItems` (slug and quantity, order-independent) —
+two different compositions never share an entry, and two cart lines (or two
+separately mounted instances of this hook — e.g. two cart summaries on one
+page, or React StrictMode's double-mount) pricing the *same* composition
+content resolve from one request. Same module-scoped-cache /
+in-flight-dedup / one-TTL shape as `useCartPrerequisites` and
+`useCartProducts`.
+
+Request body is `{ domain, productSlugs }` where `productSlugs` is the
+composition's `includedItems` slugs (never the bundle's own slug) — the
+generic bundle-rules price endpoint prices whatever chosen-item set it's
+given, so it's the *included* items that need pricing, not the bundle
+product itself.
 
 ## Development
 
