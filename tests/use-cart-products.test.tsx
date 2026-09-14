@@ -107,7 +107,7 @@ describe('useCartProducts', () => {
 
     act(() => { result.current.cart.addItem('product-a', 3); });
 
-    await waitFor(() => !result.current.products.isLoading);
+    await waitFor(() => expect(result.current.products.isLoading).toBe(false));
 
     expect(result.current.products.products[0].quantity).toBe(3);
   });
