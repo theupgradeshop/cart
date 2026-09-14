@@ -69,4 +69,50 @@ describe('migrateCartStorage', () => {
     ]);
     expect(migrateCartStorage(raw)).toEqual([]);
   });
+
+  // --- composition (U6.1 / D2 as amended) ---------------------------------------------
+  //
+  // The published version (commit 92033c3f, current at HEAD for this file, src/types.ts
+  // and src/cart-context.tsx as of this unit) never wrote a `composition` key — it stored
+  // exactly `{ slug, quantity, variantId? }` via `localStorage.setItem(storageKey,
+  // JSON.stringify(items))` (src/cart-context.tsx). This is a LITERAL fixture of that shape,
+  // not a round-trip through the new code — a round-trip can't prove the new code still
+  // reads the old one.
+  it('deserializes a literal fixture of the published (pre-composition) format with no error, no lost line, and composition undefined', () => {
+    const raw = '[{"slug":"product-a","quantity":2},{"slug":"product-b","quantity":1,"variantId":"v1"}]';
+    const result = migrateCartStorage(raw);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].composition).toBeUndefined();
+    expect(result[1].composition).toBeUndefined();
+    expect(result).toEqual([
+      { slug: 'product-a', quantity: 2 },
+      { slug: 'product-b', quantity: 1, variantId: 'v1' },
+    ]);
+  });
+
+  // The reverse direction (plan objection 10): a cart the NEW code wrote, carrying a
+  // composition, must also survive migrateCartStorage without losing the composition or
+  // its per-included-item quantities.
+  it('preserves a composition, including per-included-item quantity, through the new-format branch (reverse direction)', () => {
+    const composition = {
+      bundleSlug: 'starter-bundle',
+      includedItems: [
+        { slug: 'item-a', quantity: 2 },
+        { slug: 'item-b', quantity: 1 },
+      ],
+    };
+    const raw = JSON.stringify([{ slug: 'starter-bundle', quantity: 1, composition }]);
+    const result = migrateCartStorage(raw);
+
+    expect(result[0].composition?.includedItems).toEqual(composition.includedItems);
+    expect(result).toEqual([{ slug: 'starter-bundle', quantity: 1, composition }]);
+  });
+
+  it('drops a malformed composition (missing includedItems) rather than passing it through', () => {
+    const raw = JSON.stringify([{ slug: 'bad', quantity: 1, composition: { bundleSlug: 'x' } }]);
+    const result = migrateCartStorage(raw);
+
+    expect(result[0].composition).toBeUndefined();
+  });
 });

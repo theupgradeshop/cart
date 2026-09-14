@@ -68,6 +68,15 @@ function cartReducer(state, action) {
 }
 
 // src/migrate-storage.ts
+function isValidComposition(value) {
+  if (typeof value !== "object" || value === null) return false;
+  const composition = value;
+  if (typeof composition.bundleSlug !== "string") return false;
+  if (!Array.isArray(composition.includedItems)) return false;
+  return composition.includedItems.every(
+    (item) => typeof item === "object" && item !== null && typeof item.slug === "string" && typeof item.quantity === "number"
+  );
+}
 function migrateCartStorage(raw) {
   if (!raw) return [];
   let parsed;
@@ -99,6 +108,7 @@ function migrateCartStorage(raw) {
     return parsed.filter((item) => typeof item.slug === "string" && typeof item.quantity === "number" && item.quantity > 0).map((item) => {
       const result = { slug: item.slug, quantity: item.quantity };
       if (typeof item.variantId === "string") result.variantId = item.variantId;
+      if (isValidComposition(item.composition)) result.composition = item.composition;
       return result;
     });
   }

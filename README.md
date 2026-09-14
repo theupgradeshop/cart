@@ -2,15 +2,43 @@
 
 ID-only cart state management with live price fetching for Upgrade Shop
 customer websites. The cart itself only ever stores `{ slug, quantity,
-variantId? }` in `localStorage` — no price, no name, nothing that can go
-stale. Live product data (price, name, images, availability) is fetched
-separately and merged in at read time.
+variantId?, composition? }` in `localStorage` — no price, no name, nothing
+that can go stale. Live product data (price, name, images, availability) is
+fetched separately and merged in at read time.
 
 Consumed by pinned git ref from each customer site's `package.json` (e.g.
 `github:theupgradeshop/cart#<sha>` or `#v1.0.1`) — see
 `wiki/cross-cutting/customer-site-parent-addon-gate.md` for the current pin
 table. **Bumping a site's pin is a separate, deliberate step per site — a
 change landing here does not reach any site until that happens.**
+
+## `CartItem.composition`
+
+`composition` is an **optional** field on `CartItem` (`src/types.ts`). It is
+absent on every ordinary line, and absent on every line stored before this
+field existed — `migrateCartStorage` (`src/migrate-storage.ts`) only ever adds
+it when the stored value already carries a valid one, so an old cart (or any
+cart on a site that never touches bundles) deserializes with `composition:
+undefined`, never `null` and never `{}`.
+
+```ts
+composition?: {
+  bundleSlug: string;
+  includedItems: Array<{ slug: string; quantity: number }>;
+}
+```
+
+It records the actual contents of a bundle line when they differ from the
+bundle's default definition — an item swapped out, removed, or added. Each
+included item carries its own **quantity**, not bare membership
+(`includedItemSlugs: string[]` was rejected for exactly this reason): a
+bundle item's quantity in `product_bundle_items` is 1 on every row today, but
+nothing about the schema guarantees that stays true, so the shape has to
+express it from the start rather than needing a second migration later.
+
+This unit (U6.1) only lands the shape and its backward compatibility —
+nothing yet writes a `composition`. Building a bundle editor or pricing a
+composed bundle is out of scope here.
 
 ## Exports
 

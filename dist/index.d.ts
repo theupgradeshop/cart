@@ -1,11 +1,28 @@
 import * as react_jsx_runtime from 'react/jsx-runtime';
 import { ReactNode } from 'react';
 
+/**
+ * A cart line's bundle composition. Optional and additive — absent on every line an
+ * account that never touches bundles ever creates, and on every line stored before this
+ * field existed (see migrate-storage.ts).
+ *
+ * `includedItems` carries a quantity per item rather than bare membership: a bundle item's
+ * quantity in `product_bundle_items` can be greater than one, so `includedItemSlugs: string[]`
+ * cannot represent it.
+ */
+interface CartItemComposition {
+    bundleSlug: string;
+    includedItems: Array<{
+        slug: string;
+        quantity: number;
+    }>;
+}
 /** Stored in localStorage — identity only, no price snapshot */
 interface CartItem {
     slug: string;
     quantity: number;
     variantId?: string;
+    composition?: CartItemComposition;
 }
 interface ProductVariant {
     id: string;

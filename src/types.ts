@@ -1,8 +1,23 @@
+/**
+ * A cart line's bundle composition. Optional and additive — absent on every line an
+ * account that never touches bundles ever creates, and on every line stored before this
+ * field existed (see migrate-storage.ts).
+ *
+ * `includedItems` carries a quantity per item rather than bare membership: a bundle item's
+ * quantity in `product_bundle_items` can be greater than one, so `includedItemSlugs: string[]`
+ * cannot represent it.
+ */
+export interface CartItemComposition {
+  bundleSlug: string;
+  includedItems: Array<{ slug: string; quantity: number }>;
+}
+
 /** Stored in localStorage — identity only, no price snapshot */
 export interface CartItem {
   slug: string;       // Product slug — must be treated as immutable in the dashboard
   quantity: number;
   variantId?: string; // Required for variant products — see addItem() contract
+  composition?: CartItemComposition; // Present only for an edited bundle line — see CartItemComposition
 }
 
 export interface ProductVariant {
