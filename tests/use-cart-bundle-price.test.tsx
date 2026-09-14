@@ -21,6 +21,24 @@ function seedCart(storageKey: string, items: unknown[]) {
   localStorage.setItem(storageKey, JSON.stringify(items));
 }
 
+// "Fails open, no thrown error" is a claim about the RUNTIME, not just the hook's returned
+// state — setError()/setLoadingKeys() run inside the same .catch/.finally block a rethrow
+// would also run inside, so a hook-state assertion alone cannot tell a caught error apart
+// from one that also escapes uncaught afterward (proven: mutating the .catch to rethrow left
+// every state assertion below green, and only surfaced as an unhandled rejection outside any
+// test's assertions). This listens for that directly, at the one place the property is
+// actually observable — the process fires here if EITHER promise the hook creates rejects
+// with no .catch left holding it, and does not fire when every rejection is fully consumed.
+function captureUnhandledRejections() {
+  const rejections: unknown[] = [];
+  const handler = (reason: unknown) => rejections.push(reason);
+  process.on('unhandledRejection', handler);
+  return {
+    rejections,
+    stop: () => process.off('unhandledRejection', handler),
+  };
+}
+
 function makeWrapper(storageKey: string) {
   return function Wrapper({ children }: { children: React.ReactNode }) {
     return (
@@ -247,7 +265,7 @@ describe('useCartBundlePrice', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('FAIL-OPEN: a non-ok response yields no price and no thrown error', async () => {
+  it('FAIL-OPEN: a non-ok response settles to no-price/no-throw — asserted on the runtime, not just returned state', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: false,
       status: 500,
@@ -255,33 +273,48 @@ describe('useCartBundlePrice', () => {
     } as Response);
 
     seedCart('fail-open-500', [composedLine]);
+    const capture = captureUnhandledRejections();
 
-    const { result } = renderHook(() => useCartBundlePrice('test-500.com'), {
-      wrapper: makeWrapper('fail-open-500'),
-    });
+    try {
+      const { result } = renderHook(() => useCartBundlePrice('test-500.com'), {
+        wrapper: makeWrapper('fail-open-500'),
+      });
 
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      // Let anything the .catch/.finally chain might still propagate actually surface.
+      await new Promise(r => setTimeout(r, 20));
 
-    expect(result.current.error).toBeInstanceOf(Error);
-    expect(result.current.priceFor('starter-bundle')).toEqual({ status: 'not-loaded' });
+      expect(capture.rejections).toEqual([]);
+      expect(result.current.error).toBeInstanceOf(Error);
+      expect(result.current.priceFor('starter-bundle')).toEqual({ status: 'not-loaded' });
+    } finally {
+      capture.stop();
+    }
   });
 
-  it('FAIL-OPEN: a thrown fetch yields no price and no thrown error', async () => {
+  it('FAIL-OPEN: a thrown fetch settles to no-price/no-throw — asserted on the runtime, not just returned state', async () => {
     vi.mocked(fetch).mockRejectedValue(new Error('Network error'));
 
     seedCart('fail-open-throw', [composedLine]);
+    const capture = captureUnhandledRejections();
 
-    const { result } = renderHook(() => useCartBundlePrice('test-throw.com'), {
-      wrapper: makeWrapper('fail-open-throw'),
-    });
+    try {
+      const { result } = renderHook(() => useCartBundlePrice('test-throw.com'), {
+        wrapper: makeWrapper('fail-open-throw'),
+      });
 
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await new Promise(r => setTimeout(r, 20));
 
-    expect(result.current.error).toBeInstanceOf(Error);
-    expect(result.current.priceFor('starter-bundle')).toEqual({ status: 'not-loaded' });
+      expect(capture.rejections).toEqual([]);
+      expect(result.current.error).toBeInstanceOf(Error);
+      expect(result.current.priceFor('starter-bundle')).toEqual({ status: 'not-loaded' });
+    } finally {
+      capture.stop();
+    }
   });
 
-  it('FAIL-OPEN: an unparseable body yields no price and no thrown error', async () => {
+  it('FAIL-OPEN: an unparseable body settles to no-price/no-throw — asserted on the runtime, not just returned state', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
       json: async () => {
@@ -290,15 +323,22 @@ describe('useCartBundlePrice', () => {
     } as unknown as Response);
 
     seedCart('fail-open-unparseable', [composedLine]);
+    const capture = captureUnhandledRejections();
 
-    const { result } = renderHook(() => useCartBundlePrice('test-unparseable.com'), {
-      wrapper: makeWrapper('fail-open-unparseable'),
-    });
+    try {
+      const { result } = renderHook(() => useCartBundlePrice('test-unparseable.com'), {
+        wrapper: makeWrapper('fail-open-unparseable'),
+      });
 
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await new Promise(r => setTimeout(r, 20));
 
-    expect(result.current.error).toBeInstanceOf(Error);
-    expect(result.current.priceFor('starter-bundle')).toEqual({ status: 'not-loaded' });
+      expect(capture.rejections).toEqual([]);
+      expect(result.current.error).toBeInstanceOf(Error);
+      expect(result.current.priceFor('starter-bundle')).toEqual({ status: 'not-loaded' });
+    } finally {
+      capture.stop();
+    }
   });
 
   it('never calls addItem or removeItem', async () => {

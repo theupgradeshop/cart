@@ -174,4 +174,4 @@ declare function useCartBundlePrice(domain: string): {
     error: Error | null;
 };
 
-export { type CartBundlePriceEntry, type CartBundlePriceResult, type CartContextValue, type CartItem, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type CartSuggestionsResponse, type MissingPrerequisite, type PrerequisiteProduct, type ProductVariant, useCart, useCartBundlePrice, useCartPrerequisites, useCartProducts, useCartSuggestions };
+export { type CartBundlePriceEntry, type CartBundlePriceResult, type CartContextValue, type CartItem, type CartItemComposition, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type CartSuggestionsResponse, type MissingPrerequisite, type PrerequisiteProduct, type ProductVariant, useCart, useCartBundlePrice, useCartPrerequisites, useCartProducts, useCartSuggestions };

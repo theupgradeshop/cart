@@ -8,6 +8,7 @@ export { useCartBundlePrice } from './use-cart-bundle-price';
 export type { CartBundlePriceResult, CartBundlePriceEntry } from './use-cart-bundle-price';
 export type {
   CartItem,
+  CartItemComposition,
   CartProduct,
   CartContextValue,
   ProductVariant,
