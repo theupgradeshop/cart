@@ -60,10 +60,16 @@ describe('useCartProducts', () => {
   });
 
   it('marks products as unavailable when missing from API response', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ products: [] }), // API returns no products
-    } as Response);
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ products: [] }), // API returns no products
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'Product not found' }), // single-product fallback also misses
+      } as Response);
 
     const { result } = renderHook(
       () => ({ cart: useCart(), products: useCartProducts('test-unavailable.com') }),
@@ -92,6 +98,71 @@ describe('useCartProducts', () => {
 
     expect(result.current.products.error).toBeInstanceOf(Error);
     expect(result.current.products.products).toEqual([]);
+  });
+
+  it('falls back to the single-product endpoint when a slug is missing from the catalog (hide_from_shop)', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ products: [] }), // catalog excludes hidden products
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          product: {
+            slug: 'hidden-product',
+            name: 'Hidden Product',
+            price: 55,
+            salePrice: null,
+            images: [{ url: '/hidden.jpg', alt: 'Hidden' }],
+            status: 'active',
+            variants: [],
+          },
+        }),
+      } as Response);
+
+    const { result } = renderHook(
+      () => ({ cart: useCart(), products: useCartProducts('test-hidden.com') }),
+      { wrapper: makeWrapper() }
+    );
+
+    act(() => { result.current.cart.addItem('hidden-product', 1); });
+
+    await waitFor(() => expect(result.current.products.isLoading).toBe(false));
+
+    expect(fetch).toHaveBeenCalledWith('https://api.test/api/public/products?domain=test-hidden.com');
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.test/api/public/products/hidden-product?domain=test-hidden.com'
+    );
+    expect(result.current.products.products).toHaveLength(1);
+    expect(result.current.products.products[0].status).toBe('active');
+    expect(result.current.products.products[0].price).toBe(55);
+    expect(result.current.products.products[0].name).toBe('Hidden Product');
+  });
+
+  it('degrades to unavailable when the single-product fallback also fails', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ products: [] }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'Product not found' }),
+      } as Response);
+
+    const { result } = renderHook(
+      () => ({ cart: useCart(), products: useCartProducts('test-hidden-404.com') }),
+      { wrapper: makeWrapper() }
+    );
+
+    act(() => { result.current.cart.addItem('truly-missing-product', 1); });
+
+    await waitFor(() => expect(result.current.products.isLoading).toBe(false));
+
+    expect(result.current.products.products[0].status).toBe('unavailable');
+    expect(result.current.products.products[0].price).toBe(0);
   });
 
   it('merges quantity from cart into CartProduct', async () => {

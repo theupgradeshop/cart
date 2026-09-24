@@ -191,6 +191,7 @@ function useCart() {
 import { useContext as useContext2, useEffect as useEffect2, useState as useState2 } from "react";
 var productCache = /* @__PURE__ */ new Map();
 var CACHE_TTL_MS = 6e4;
+var singleProductCache = /* @__PURE__ */ new Map();
 async function fetchProductCatalog(apiBaseUrl, domain) {
   const cacheKey = `${apiBaseUrl}::${domain}`;
   const cached = productCache.get(cacheKey);
@@ -219,6 +220,39 @@ async function fetchProductCatalog(apiBaseUrl, domain) {
   });
   return promise;
 }
+async function fetchProductBySlug(apiBaseUrl, domain, slug) {
+  const cacheKey = `${apiBaseUrl}::${domain}::${slug}`;
+  const cached = singleProductCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && !cached.promise && now - cached.timestamp < CACHE_TTL_MS) {
+    return cached.data;
+  }
+  if (cached?.promise) {
+    return cached.promise;
+  }
+  const promise = fetch(
+    `${apiBaseUrl}/api/public/products/${encodeURIComponent(slug)}?domain=${encodeURIComponent(domain)}`
+  ).then((res) => {
+    if (!res.ok) return null;
+    return res.json();
+  }).then((json) => {
+    const data = json?.product ?? null;
+    singleProductCache.set(cacheKey, { data, timestamp: Date.now() });
+    return data;
+  }).catch(() => {
+    singleProductCache.set(cacheKey, { data: null, timestamp: Date.now() });
+    return null;
+  }).finally(() => {
+    const entry = singleProductCache.get(cacheKey);
+    if (entry) singleProductCache.set(cacheKey, { ...entry, promise: void 0 });
+  });
+  singleProductCache.set(cacheKey, {
+    data: cached?.data ?? null,
+    timestamp: cached?.timestamp ?? 0,
+    promise
+  });
+  return promise;
+}
 function useCartProducts(domain) {
   const cartCtx = useContext2(CartContext);
   const config = useContext2(CartConfigContext);
@@ -237,11 +271,23 @@ function useCartProducts(domain) {
       return;
     }
     setIsLoading(true);
-    fetchProductCatalog(apiBaseUrl, domain).then((allProducts) => {
+    fetchProductCatalog(apiBaseUrl, domain).then(async (allProducts) => {
       if (cancelled) return;
       const liveMap = new Map(
         allProducts.map((p) => [p.slug, p])
       );
+      const missingSlugs = [...new Set(
+        items.map((i) => i.slug).filter((slug) => !liveMap.has(slug))
+      )];
+      if (missingSlugs.length > 0) {
+        const fallbackResults = await Promise.all(
+          missingSlugs.map((slug) => fetchProductBySlug(apiBaseUrl, domain, slug))
+        );
+        fallbackResults.forEach((product, i) => {
+          if (product) liveMap.set(missingSlugs[i], product);
+        });
+      }
+      if (cancelled) return;
       const merged = items.map((item) => {
         const live = liveMap.get(item.slug);
         if (!live) {
