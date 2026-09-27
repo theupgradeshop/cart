@@ -52,3 +52,16 @@ export type {
   BundleOfferResponse,
   UseBundleOfferResult,
 } from './use-bundle-offer';
+
+// Bundle builder presets (D8/D10, courses-bundles storefront spec Round 2, Unit R3) —
+// pure helpers mirroring the presets design reference's derived state and actions.
+// See src/bundle-presets.ts.
+export {
+  sameSet,
+  presetSelection,
+  presetOwned,
+  derivePresetState,
+  quotePreset,
+  resolveCheckoutSelection,
+} from './bundle-presets';
+export type { OfferPreset, PresetDerivedState } from './bundle-presets';

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BundleOffer, CourseDetail, CoursesById, Quote, Nudge, RuleOffer, quote, next } from './bundle-engine';
+import { BundleOffer, CourseDetail, CoursesById, Quote, Nudge, OfferPreset, RuleOffer, quote, next } from './bundle-engine';
+import { PresetDerivedState, derivePresetState } from './bundle-presets';
 
 export type BundleOfferStatus = 'live' | 'draft' | 'gone';
 
@@ -17,6 +18,13 @@ export interface BundleOfferResponse {
   courses: CourseDetail[];
   alts: RuleOffer[];
   owned: string[];
+  /**
+   * Ready-made picks for a rule offer (D8, R2 contract) — the R2 route nests these
+   * under `offer.presets`; this mirrors the same list at the response's top level so
+   * a consumer never has to narrow `offer` to `RuleOffer` just to read them. Always
+   * `undefined`/absent for a fixed offer or when the offer has no presets.
+   */
+  presets?: OfferPreset[];
 }
 
 export type BundleOfferState =
@@ -39,6 +47,18 @@ export interface UseBundleOfferResult {
   next: Nudge | null;
   loading: boolean;
   error: Error | null;
+  /** Ready-made picks for the current rule offer (D8) — `[]` for a fixed offer or none. */
+  presets: OfferPreset[];
+  /** The active preset's id, or `null` when building your own. Resets when `url` changes. */
+  preset: string | null;
+  /** Controlled setter for `preset` — the README's raw `onPreset`. */
+  setPreset: (id: string | null) => void;
+  /** "Take preset" (README Actions): selects the preset and seeds `sel` per its `swap` flag. */
+  takePreset: (id: string) => void;
+  /** "Build your own" (README Actions): clears the active preset, keeping an edited (`mine`) selection. */
+  buildOwn: () => void;
+  /** "Undo changes" (README Actions): resets `sel` back to the active preset's own selection. Only meaningful when the current selection is `mine` (a no-op otherwise). */
+  undoChanges: () => void;
 }
 
 /**
@@ -55,6 +75,7 @@ export interface UseBundleOfferResult {
 export function useBundleOffer(url: string): UseBundleOfferResult {
   const [state, setState] = useState<BundleOfferState>({ status: 'loading' });
   const [sel, setSelState] = useState<string[]>([]);
+  const [preset, setPresetState] = useState<string | null>(null);
   const requestIdRef = useRef(0);
 
   useEffect(() => {
@@ -62,6 +83,7 @@ export function useBundleOffer(url: string): UseBundleOfferResult {
     const requestId = ++requestIdRef.current;
     setState({ status: 'loading' });
     setSelState([]);
+    setPresetState(null);
 
     fetch(url)
       .then(res => {
@@ -130,6 +152,38 @@ export function useBundleOffer(url: string): UseBundleOfferResult {
   const computedQuote = ruleOffer ? quote(ruleOffer, alts as RuleOffer[], sel, owned, coursesById) : null;
   const computedNext = ruleOffer && computedQuote ? next(ruleOffer, alts as RuleOffer[], computedQuote, sel, owned, coursesById) : null;
 
+  const presets: OfferPreset[] = ruleOffer?.presets ?? [];
+
+  const derived: PresetDerivedState = useMemo(
+    () => derivePresetState({ presets, preset, sel, owned }),
+    [presets, preset, sel, owned]
+  );
+
+  const setPreset = useCallback((id: string | null) => {
+    setPresetState(id);
+  }, []);
+
+  const takePreset = useCallback(
+    (id: string) => {
+      const p = presets.find(candidate => candidate.id === id);
+      if (!p) return;
+      setPresetState(p.id);
+      setSelState(p.swap ? p.ids.filter(cid => !owned.includes(cid)) : []);
+    },
+    [presets, owned]
+  );
+
+  const buildOwn = useCallback(() => {
+    if (!derived.act) return; // no-op when already building their own
+    setPresetState(null);
+    if (!derived.mine) setSelState([]); // keeps the shopper's edited (mine) selection
+  }, [derived.act, derived.mine]);
+
+  const undoChanges = useCallback(() => {
+    if (!derived.mine) return;
+    setSelState(derived.pSel);
+  }, [derived.mine, derived.pSel]);
+
   return {
     status: state.status,
     currency,
@@ -144,5 +198,11 @@ export function useBundleOffer(url: string): UseBundleOfferResult {
     next: computedNext,
     loading: state.status === 'loading',
     error: state.status === 'error' ? state.error : null,
+    presets,
+    preset,
+    setPreset,
+    takePreset,
+    buildOwn,
+    undoChanges,
   };
 }

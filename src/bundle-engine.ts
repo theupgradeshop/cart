@@ -59,6 +59,17 @@ export interface FixedPriceTier {
   fixedPriceMinor: number;
 }
 
+/**
+ * A ready-made pick on a rule offer (D8, presets Round 2). See `bundle-presets.ts`
+ * for the derived state / actions built on this shape.
+ */
+export interface OfferPreset {
+  id: string;
+  name: string;
+  ids: string[];
+  swap: boolean;
+}
+
 interface RuleOfferBase {
   kind: 'rule';
   id: string;
@@ -68,6 +79,8 @@ interface RuleOfferBase {
   eligible: string[];
   min: number;
   max: number;
+  /** Ready-made picks (D8, presets Round 2 R2/R3) — only on rule offers, only valid ones. */
+  presets?: OfferPreset[];
 }
 
 export type RuleOffer =

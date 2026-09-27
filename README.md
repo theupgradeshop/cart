@@ -285,8 +285,50 @@ together, never one alone.
 offer from the site's own route (contract:
 `2026-09-27-course-bundles-storefront-and-pe-block.md`), holds the shopper's
 `sel` (resetting on `url` change), and returns `{ status, currency, offer,
-courses, alts, owned, sel, setSel, toggle, quote, next, loading, error }`.
+courses, alts, owned, sel, setSel, toggle, quote, next, loading, error,
+presets, preset, setPreset, takePreset, buildOwn, undoChanges }`.
 No UI, no React-DOM rendering — that's per site (courses-bundles spec, U4).
+
+## Bundle builder presets (D8/D10, courses-bundles storefront spec Round 2, Unit R3)
+
+Pure helpers in `src/bundle-presets.ts` for a rule offer's ready-made picks
+("presets" — `offer.presets: OfferPreset[]`, `{ id, name, ids, swap }`),
+mirroring the presets design reference's derived state and actions exactly
+(`cowork/design-references/design_handoff_bundle_builder_presets/README.md`
+"Derived state" / "Actions", `BundleBuilder.jsx`'s `BB_same` and the
+`BundleBuilderBlock`'s `act`/`locked`/`pSel`/`mine`/`take`/`buildOwn`).
+**A preset carries no price of its own (D10)** — every price shown for a
+preset comes from `quotePreset`, which is the same `quote()` engine every
+manual selection uses, never a second price path.
+
+- `sameSet(a, b)` — set equality by membership, order-independent.
+- `presetSelection(preset, owned)` — the preset's own selection with owned
+  courses removed (`pSel` in the README: `preset.ids minus owned`).
+- `presetOwned(preset, owned)` — the owned set to price the preset against
+  (README "owned'"): `owned ∩ preset.ids` for a non-swappable preset, the
+  full `owned` list for a swappable one.
+- `derivePresetState({ presets, preset, sel, owned })` — `{ act, locked,
+  pSel, mine }`, field-for-field per the README's "Derived state". `mine` is
+  derived, never stored: editing a swappable pick's selection back to
+  exactly the preset's own set makes it read as the preset again.
+- `quotePreset(offer, alts, preset, owned, courses)` — the card/CTA price
+  for a preset: `quote()` against `presetOwned(preset, owned)`.
+- `resolveCheckoutSelection({ presets, preset, sel, owned, quote })` — the
+  course ids to send to checkout (D10): a locked (non-swappable) preset
+  sends `preset.ids` (owned included — the server prices the owned courses
+  via the session contact); otherwise it's `quote.own` + `quote.picked` —
+  the SAME combination `BundleBuilder.jsx`'s own CTA (`filled = [...q.own,
+  ...q.picked]`) already uses, reused rather than re-derived, so there is
+  exactly one rule for how owned ids get included in a checkout selection.
+
+`useBundleOffer` wires these in: it fetches `offer.presets` (mirrored at
+`BundleOfferResponse.presets` too, so a caller never has to narrow `offer`
+to `RuleOffer` just to read them) and exposes `presets`, the controlled
+`preset` (resets to `null` whenever `url` changes, alongside `sel`),
+`setPreset`, and the README's three actions as functions: `takePreset(id)`
+(take), `buildOwn()` (build your own — clears an untouched preset's `sel`,
+keeps an edited/"mine" one), `undoChanges()` (only meaningful when the
+current selection is "mine"; a no-op otherwise).
 
 ## Development
 

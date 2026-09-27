@@ -910,15 +910,46 @@ function fixedQuote(offer, coursesById) {
 
 // src/use-bundle-offer.ts
 import { useCallback as useCallback4, useEffect as useEffect6, useMemo, useRef as useRef2, useState as useState6 } from "react";
+
+// src/bundle-presets.ts
+function sameSet(a, b) {
+  return a.length === b.length && a.every((x) => b.includes(x));
+}
+function presetSelection(preset, owned) {
+  return preset.ids.filter((id) => !owned.includes(id));
+}
+function presetOwned(preset, owned) {
+  return preset.swap ? owned : owned.filter((id) => preset.ids.includes(id));
+}
+function derivePresetState(params) {
+  const { presets, preset, sel, owned } = params;
+  const act = presets.find((p) => p.id === preset) ?? null;
+  const locked = !!act && !act.swap;
+  const pSel = act ? presetSelection(act, owned) : [];
+  const mine = !!act && act.swap && !sameSet(sel, pSel);
+  return { act, locked, pSel, mine };
+}
+function quotePreset(offer, alts, preset, owned, courses) {
+  return quote(offer, alts, preset.ids, presetOwned(preset, owned), courses);
+}
+function resolveCheckoutSelection(params) {
+  const { act, locked } = derivePresetState(params);
+  if (act && locked) return act.ids;
+  return [...params.quote.own, ...params.quote.picked];
+}
+
+// src/use-bundle-offer.ts
 function useBundleOffer(url) {
   const [state, setState] = useState6({ status: "loading" });
   const [sel, setSelState] = useState6([]);
+  const [preset, setPresetState] = useState6(null);
   const requestIdRef = useRef2(0);
   useEffect6(() => {
     let cancelled = false;
     const requestId = ++requestIdRef.current;
     setState({ status: "loading" });
     setSelState([]);
+    setPresetState(null);
     fetch(url).then((res) => {
       if (!res.ok) throw new Error(`Bundle offer fetch failed: ${res.status}`);
       return res.json();
@@ -972,6 +1003,32 @@ function useBundleOffer(url) {
   );
   const computedQuote = ruleOffer ? quote(ruleOffer, alts, sel, owned, coursesById) : null;
   const computedNext = ruleOffer && computedQuote ? next(ruleOffer, alts, computedQuote, sel, owned, coursesById) : null;
+  const presets = ruleOffer?.presets ?? [];
+  const derived = useMemo(
+    () => derivePresetState({ presets, preset, sel, owned }),
+    [presets, preset, sel, owned]
+  );
+  const setPreset = useCallback4((id) => {
+    setPresetState(id);
+  }, []);
+  const takePreset = useCallback4(
+    (id) => {
+      const p = presets.find((candidate) => candidate.id === id);
+      if (!p) return;
+      setPresetState(p.id);
+      setSelState(p.swap ? p.ids.filter((cid) => !owned.includes(cid)) : []);
+    },
+    [presets, owned]
+  );
+  const buildOwn = useCallback4(() => {
+    if (!derived.act) return;
+    setPresetState(null);
+    if (!derived.mine) setSelState([]);
+  }, [derived.act, derived.mine]);
+  const undoChanges = useCallback4(() => {
+    if (!derived.mine) return;
+    setSelState(derived.pSel);
+  }, [derived.mine, derived.pSel]);
   return {
     status: state.status,
     currency,
@@ -985,15 +1042,27 @@ function useBundleOffer(url) {
     quote: computedQuote,
     next: computedNext,
     loading: state.status === "loading",
-    error: state.status === "error" ? state.error : null
+    error: state.status === "error" ? state.error : null,
+    presets,
+    preset,
+    setPreset,
+    takePreset,
+    buildOwn,
+    undoChanges
   };
 }
 export {
   CartProvider,
+  derivePresetState,
   fixedQuote,
   next,
+  presetOwned,
+  presetSelection,
   quote,
   quoteOne,
+  quotePreset,
+  resolveCheckoutSelection,
+  sameSet,
   toComposedBundleCheckoutFragment,
   useBundleOffer,
   useCart,

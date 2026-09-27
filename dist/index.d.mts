@@ -261,6 +261,16 @@ interface FixedPriceTier {
     count: number;
     fixedPriceMinor: number;
 }
+/**
+ * A ready-made pick on a rule offer (D8, presets Round 2). See `bundle-presets.ts`
+ * for the derived state / actions built on this shape.
+ */
+interface OfferPreset {
+    id: string;
+    name: string;
+    ids: string[];
+    swap: boolean;
+}
 interface RuleOfferBase {
     kind: 'rule';
     id: string;
@@ -270,6 +280,8 @@ interface RuleOfferBase {
     eligible: string[];
     min: number;
     max: number;
+    /** Ready-made picks (D8, presets Round 2 R2/R3) — only on rule offers, only valid ones. */
+    presets?: OfferPreset[];
 }
 type RuleOffer = (RuleOfferBase & {
     scheme: 'tiered_by_count';
@@ -393,6 +405,13 @@ interface BundleOfferResponse {
     courses: CourseDetail[];
     alts: RuleOffer[];
     owned: string[];
+    /**
+     * Ready-made picks for a rule offer (D8, R2 contract) — the R2 route nests these
+     * under `offer.presets`; this mirrors the same list at the response's top level so
+     * a consumer never has to narrow `offer` to `RuleOffer` just to read them. Always
+     * `undefined`/absent for a fixed offer or when the offer has no presets.
+     */
+    presets?: OfferPreset[];
 }
 interface UseBundleOfferResult {
     status: 'loading' | 'error' | 'live' | 'draft' | 'gone';
@@ -409,6 +428,18 @@ interface UseBundleOfferResult {
     next: Nudge | null;
     loading: boolean;
     error: Error | null;
+    /** Ready-made picks for the current rule offer (D8) — `[]` for a fixed offer or none. */
+    presets: OfferPreset[];
+    /** The active preset's id, or `null` when building your own. Resets when `url` changes. */
+    preset: string | null;
+    /** Controlled setter for `preset` — the README's raw `onPreset`. */
+    setPreset: (id: string | null) => void;
+    /** "Take preset" (README Actions): selects the preset and seeds `sel` per its `swap` flag. */
+    takePreset: (id: string) => void;
+    /** "Build your own" (README Actions): clears the active preset, keeping an edited (`mine`) selection. */
+    buildOwn: () => void;
+    /** "Undo changes" (README Actions): resets `sel` back to the active preset's own selection. Only meaningful when the current selection is `mine` (a no-op otherwise). */
+    undoChanges: () => void;
 }
 /**
  * Fetches a single bundle offer from the site's own route (`url`, e.g.
@@ -423,4 +454,73 @@ interface UseBundleOfferResult {
  */
 declare function useBundleOffer(url: string): UseBundleOfferResult;
 
-export { type FixedQuote as BundleFixedQuote, type Nudge as BundleNudge, type BundleOffer, type BundleOfferResponse, type BundleOfferStatus, type Quote as BundleQuote, type CartBundlePriceEntry, type CartBundlePriceResult, type CartContextValue, type CartItem, type CartItemComposition, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type CartSuggestionsResponse, type ComposedCourseBundleCartItem, type CountTier, type CourseDetail, type CoursesById, type EvaluationBasis, type FixedOffer, type FixedPriceTier, type FlatPercentageBasis, type Gap, type MatchedTierBasis, type MissingPrerequisite, type PerItemBasis, type PrerequisiteProduct, type ProductVariant, type RuleOffer, type UseBundleOfferResult, fixedQuote, next, quote, quoteOne, toComposedBundleCheckoutFragment, useBundleOffer, useCart, useCartBundlePrice, useCartPrerequisites, useCartProducts, useCartSuggestions };
+/**
+ * Bundle builder presets (D8/D10, `2026-09-27-course-bundles-storefront-and-pe-block.md`
+ * Round 2, Unit R3). Pure helpers mirroring the presets design reference exactly
+ * (`cowork/design-references/design_handoff_bundle_builder_presets/README.md`,
+ * "Derived state" / "Actions", and `BundleBuilder.jsx`'s `BB_same`,
+ * `BundleBuilderBlock`'s `act`/`locked`/`pSel`/`mine`/`take`/`buildOwn`).
+ *
+ * A preset carries NO price of its own (D10, the presets README: "Presets have no
+ * price field") — its price is always `quote()`/`quoteOne()` against the resolved
+ * owned set, never a new price path.
+ */
+
+/** Set equality by membership, order-independent — mirrors `BB_same`. */
+declare function sameSet(a: string[], b: string[]): boolean;
+/** A preset's own selection with owned courses removed — mirrors `pSel` (`p.ids minus owned`). */
+declare function presetSelection(preset: OfferPreset, owned: string[]): string[];
+/**
+ * The owned set to price a preset against (README "owned'"): a NON-swappable preset
+ * prices against `owned ∩ preset.ids` (a set is a set); a swappable preset prices
+ * against the full `owned` list, exactly like manual picking.
+ */
+declare function presetOwned(preset: OfferPreset, owned: string[]): string[];
+interface PresetDerivedState {
+    /** The active preset object, or `null` when building your own. */
+    act: OfferPreset | null;
+    /** A non-swappable preset is active — tray/toggles hidden, only its own courses shown. */
+    locked: boolean;
+    /** The active preset's selection with owned removed (`[]` when no preset is active). */
+    pSel: string[];
+    /** A swappable preset was taken, then the shopper edited away from its exact set. */
+    mine: boolean;
+}
+/**
+ * Derived state for the active preset against the current selection — mirrors the
+ * README's "Derived state" block field-for-field (`act`, `locked`, `pSel`, `mine`).
+ * `mine` is derived, never stored: editing back to exactly the preset's set makes it
+ * read as the preset again.
+ */
+declare function derivePresetState(params: {
+    presets: OfferPreset[];
+    preset: string | null;
+    sel: string[];
+    owned: string[];
+}): PresetDerivedState;
+/**
+ * Price for a preset card/CTA — always `quote()` against the resolved owned set
+ * (README: "Price is always `BB_quote(offer, alts, preset.ids, owned', courses)` —
+ * identical to picking by hand"). Never a new price path.
+ */
+declare function quotePreset(offer: RuleOffer, alts: RuleOffer[], preset: OfferPreset, owned: string[], courses: CoursesById): Quote;
+/**
+ * The course ids to send to checkout (D10): a locked (non-swappable) preset sends
+ * its full `preset.ids` (owned courses included — the server prices owned via the
+ * session contact via `composed-bundle.ts`'s checkout fragment); otherwise the same
+ * combination the design's own CTA uses today — the picked (non-owned) selection
+ * plus whichever owned courses are actually eligible on this offer (`filled =
+ * [...q.own, ...q.picked]` in `BundleBuilder.jsx`). `quote` is the `Quote` already
+ * computed for the current offer/alts/sel/owned (via `quote()` in `bundle-engine.ts`)
+ * — its `own`/`picked` fields are THE one rule for how owned ids get included, so
+ * this reuses them rather than re-deriving eligibility a second time.
+ */
+declare function resolveCheckoutSelection(params: {
+    presets: OfferPreset[];
+    preset: string | null;
+    sel: string[];
+    owned: string[];
+    quote: Quote;
+}): string[];
+
+export { type FixedQuote as BundleFixedQuote, type Nudge as BundleNudge, type BundleOffer, type BundleOfferResponse, type BundleOfferStatus, type Quote as BundleQuote, type CartBundlePriceEntry, type CartBundlePriceResult, type CartContextValue, type CartItem, type CartItemComposition, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type CartSuggestionsResponse, type ComposedCourseBundleCartItem, type CountTier, type CourseDetail, type CoursesById, type EvaluationBasis, type FixedOffer, type FixedPriceTier, type FlatPercentageBasis, type Gap, type MatchedTierBasis, type MissingPrerequisite, type OfferPreset, type PerItemBasis, type PrerequisiteProduct, type PresetDerivedState, type ProductVariant, type RuleOffer, type UseBundleOfferResult, derivePresetState, fixedQuote, next, presetOwned, presetSelection, quote, quoteOne, quotePreset, resolveCheckoutSelection, sameSet, toComposedBundleCheckoutFragment, useBundleOffer, useCart, useCartBundlePrice, useCartPrerequisites, useCartProducts, useCartSuggestions };
