@@ -48,14 +48,35 @@ interface CartProduct {
     quantity: number;
     variantId?: string;
 }
+/**
+ * The cart's single composed-course-bundle line (courses-bundles storefront spec, U3).
+ * At most ONE of these exists in a cart at a time -- setting a new one replaces the
+ * previous, matching checkout's own contract, which accepts one `composedBundle`
+ * (`{ courseIds }`) per order. Kept OUT of the `items` array on purpose: `items` holds
+ * only ordinary product lines (`{ slug, quantity, ... }`), and every existing consumer of
+ * `items` (use-cart-products, use-cart-prerequisites, use-cart-suggestions, the reducer's
+ * slug/variantId keying) assumes exactly that shape -- folding a differently-shaped line
+ * into the same array would silently break each of them for a slug-less entry. This is
+ * "a sibling type", per the spec's own phrasing, not an extension of `CartItem`.
+ */
+interface ComposedCourseBundleCartItem {
+    kind: 'composed-course-bundle';
+    ruleId: string;
+    courseIds: string[];
+    title: string;
+}
 interface CartContextValue {
     items: CartItem[];
+    composedBundle: ComposedCourseBundleCartItem | null;
     isOpen: boolean;
     itemCount: number;
     addItem: (slug: string, quantity?: number, variantId?: string) => void;
     removeItem: (slug: string, variantId?: string) => void;
     updateQuantity: (slug: string, quantity: number, variantId?: string) => void;
     clearCart: () => void;
+    /** Replaces any existing composed-bundle line -- a cart holds at most one. */
+    setComposedBundle: (bundle: ComposedCourseBundleCartItem) => void;
+    clearComposedBundle: () => void;
     openCart: () => void;
     closeCart: () => void;
     toggleCart: () => void;
@@ -174,4 +195,232 @@ declare function useCartBundlePrice(domain: string): {
     error: Error | null;
 };
 
-export { type CartBundlePriceEntry, type CartBundlePriceResult, type CartContextValue, type CartItem, type CartItemComposition, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type CartSuggestionsResponse, type MissingPrerequisite, type PrerequisiteProduct, type ProductVariant, useCart, useCartBundlePrice, useCartPrerequisites, useCartProducts, useCartSuggestions };
+/**
+ * Turns the cart's composed-course-bundle line (if any) into the checkout body fragment
+ * the dashboard's checkout route expects — `{ composedBundle: { courseIds } }`. Returns
+ * `undefined` when there is no such line, so a caller can spread the result straight into
+ * its checkout request body (`{ ...otherFields, ...toComposedBundleCheckoutFragment(bundle) }`)
+ * without an `if` at the call site.
+ */
+declare function toComposedBundleCheckoutFragment(composedBundle: ComposedCourseBundleCartItem | null | undefined): {
+    composedBundle: {
+        courseIds: string[];
+    };
+} | undefined;
+
+/**
+ * Pure, framework-free bundle pricing engine for course bundles (D3,
+ * `2026-09-27-course-bundles-storefront-and-pe-block.md`, Unit U3).
+ *
+ * Mirrors the dashboard's server pricing EXACTLY:
+ *  - `src/lib/store/bundle-rule-evaluator.ts` (`evaluateBundleRules`) — rule
+ *    selection, per-scheme math, rounding, ties.
+ *  - `src/lib/courses/bundle-discount-guard.ts` (`guardNonPositiveDiscount`)
+ *    — suppression of a non-positive discount or a negative total to full
+ *    price, applied ONLY to the winning candidate, never per-rule.
+ *  - D1 (2026-09-27): `fixed_price_per_tier` is EXACT-COUNT — a tier applies
+ *    only when the selection size equals its `count` exactly. Any other
+ *    size inside [min, max] is a "gap": no candidate from that rule.
+ *
+ * All money is in MINOR units throughout. No React, no fetch, no storage.
+ *
+ * The storefront UI-facing shape (`Quote`, `Nudge`, `FixedQuote`) follows
+ * the generic design reference's pricing functions
+ * (`design_handoff_bundle_builder/BundleBuilder.jsx`: `BB_quoteOne`,
+ * `BB_quote`, `BB_next`, `BB_fixedQuote`) field-for-field, ported directly
+ * per that README ("Port this logic directly — it encodes confirmed
+ * pricing rules"). One deliberate refinement over the prototype: the
+ * prototype applies its "pay >= full -> show full price" fallback PER
+ * OFFER, before comparing against alternates; this engine instead computes
+ * the RAW candidate (allowing a non-positive discount or a negative total)
+ * for the primary offer and every eligible alternate, picks the cheapest
+ * raw total (ties -> lowest id, matching the evaluator's own tie rule),
+ * and applies the guard's suppression ONCE, to that single winner — the
+ * same order of operations as the real server. In every case the fixture
+ * can construct with a positive, sane discount the two produce an
+ * identical externally-visible result (a non-positive-discount rule's raw
+ * total is never lower than full price, so it can never spuriously win
+ * over a real alternate); they diverge only for a misconfigured rule whose
+ * percentOff exceeds 100 and drives the total negative, which is exactly
+ * the case the guard exists to catch, so following the guard's real
+ * predicate rather than the prototype's incidental shortcut is the
+ * correct — and D3-mandated — choice.
+ *
+ * The primary offer anchors the block: like the prototype, when the
+ * PRIMARY offer's own candidate is invalid (below min, above max, not
+ * eligible, or — fixed_price_per_tier only — a "gap") alternates are never
+ * consulted at all, even if one of them would price the same selection.
+ * This is the storefront UX decision the design reference encodes (the
+ * block is about completing THIS bundle), not a server pricing rule.
+ */
+interface CountTier {
+    count: number;
+    percentOff: number;
+}
+interface FixedPriceTier {
+    count: number;
+    fixedPriceMinor: number;
+}
+interface RuleOfferBase {
+    kind: 'rule';
+    id: string;
+    name: string;
+    title: string;
+    description: string | null;
+    eligible: string[];
+    min: number;
+    max: number;
+}
+type RuleOffer = (RuleOfferBase & {
+    scheme: 'tiered_by_count';
+    tiers: CountTier[];
+}) | (RuleOfferBase & {
+    scheme: 'flat_percentage';
+    percentOff: number;
+}) | (RuleOfferBase & {
+    scheme: 'fixed_price_per_tier';
+    tiers: FixedPriceTier[];
+}) | (RuleOfferBase & {
+    scheme: 'per_course_contribution';
+    coursePricesMinor: Record<string, number | null | undefined>;
+});
+interface FixedOffer {
+    kind: 'fixed';
+    id: string;
+    name: string;
+    title: string;
+    description: string | null;
+    ids: string[];
+    priceMinor: number;
+    productSlug: string;
+}
+type BundleOffer = RuleOffer | FixedOffer;
+interface CourseDetail {
+    id: string;
+    title: string;
+    slug: string;
+    imageUrl: string | null;
+    listPriceMinor: number;
+    productSlug: string | null;
+}
+type CoursesById = Record<string, CourseDetail>;
+interface MatchedTierBasis {
+    scheme: 'tiered_by_count' | 'fixed_price_per_tier';
+    tier: CountTier | FixedPriceTier | null;
+}
+interface FlatPercentageBasis {
+    scheme: 'flat_percentage';
+    percentOff: number;
+}
+interface PerItemBasis {
+    scheme: 'per_course_contribution';
+    perItemMinor: Record<string, number>;
+}
+type EvaluationBasis = MatchedTierBasis | FlatPercentageBasis | PerItemBasis;
+interface Gap {
+    lo: FixedPriceTier | null;
+    hi: FixedPriceTier | null;
+}
+interface Quote {
+    count: number;
+    own: string[];
+    picked: string[];
+    fullMinor: number;
+    payMinor: number;
+    offMinor: number;
+    pct: number;
+    valid: boolean;
+    short: number;
+    atMax: boolean;
+    noSaving: boolean;
+    basis: EvaluationBasis | null;
+    /** Set only when a rule other than the primary offer produced the winning price. */
+    wonOfferId: string | null;
+    /** Set only for `fixed_price_per_tier` when the size is in range but matches no exact tier. */
+    gap: Gap | null;
+}
+/**
+ * Quote for exactly one offer against a selection — mirrors `BB_quoteOne`.
+ * Used both standalone (to detect a `fixed_price_per_tier` gap on the
+ * primary offer) and as the anchor for `quote()`'s cross-offer comparison.
+ */
+declare function quoteOne(offer: RuleOffer, sel: string[], owned: string[], coursesById: CoursesById): Quote;
+/**
+ * Quote for the primary offer, then checks `alts` and swaps in whichever
+ * live rule (primary or alt) prices the same selection cheapest — mirrors
+ * `BB_quote`. When the primary offer's own quote is invalid (below min,
+ * above max, or a fixed-scheme gap) alternates are never consulted.
+ */
+declare function quote(offer: RuleOffer, alts: RuleOffer[], sel: string[], owned: string[], coursesById: CoursesById): Quote;
+type Nudge = {
+    kind: 'tier';
+    add: number;
+    to: number;
+    n: number;
+    mMinor: number | null;
+} | {
+    kind: 'set';
+    add: number;
+    n: number;
+    priceMinor: number;
+};
+declare function next(offer: RuleOffer, alts: RuleOffer[], q: Quote, sel: string[], owned: string[], coursesById: CoursesById): Nudge | null;
+interface FixedQuote {
+    fixed: true;
+    count: number;
+    picked: string[];
+    fullMinor: number;
+    payMinor: number;
+    offMinor: number;
+    pct: number;
+    valid: true;
+    noSaving: boolean;
+}
+declare function fixedQuote(offer: FixedOffer, coursesById: CoursesById): FixedQuote;
+
+type BundleOfferStatus = 'live' | 'draft' | 'gone';
+/**
+ * The site route's response shape (contract:
+ * `2026-09-27-course-bundles-storefront-and-pe-block.md` "Camoflash server
+ * route"): the U2 dashboard read, PLUS `owned` — course ids the logged-in
+ * shopper already owns, added server-side from the session's `contactId`,
+ * never client-supplied.
+ */
+interface BundleOfferResponse {
+    status: BundleOfferStatus;
+    currency: string;
+    offer: BundleOffer | null;
+    courses: CourseDetail[];
+    alts: RuleOffer[];
+    owned: string[];
+}
+interface UseBundleOfferResult {
+    status: 'loading' | 'error' | 'live' | 'draft' | 'gone';
+    currency: string | null;
+    offer: BundleOffer | null;
+    courses: CoursesById;
+    alts: RuleOffer[];
+    owned: string[];
+    sel: string[];
+    setSel: (next: string[]) => void;
+    toggle: (id: string) => void;
+    /** Non-null only for a `rule` offer (a `fixed` offer has no picking — see `fixedQuote`). */
+    quote: Quote | null;
+    next: Nudge | null;
+    loading: boolean;
+    error: Error | null;
+}
+/**
+ * Fetches a single bundle offer from the site's own route (`url`, e.g.
+ * `/api/bundles/rule/<id>` or `/api/bundles/fixed/<id>`) and holds the
+ * shopper's current selection (`sel`), resetting it whenever `url` changes
+ * (a different bundle starts from an empty selection, never carries over
+ * the previous bundle's picks).
+ *
+ * No UI. `setSel`/`toggle` respect `owned` (never toggle-able) and the
+ * offer's `max` (a full selection ignores further adds, same guard the
+ * storefront design encodes — `BundleBuilder.jsx`'s `toggle`).
+ */
+declare function useBundleOffer(url: string): UseBundleOfferResult;
+
+export { type FixedQuote as BundleFixedQuote, type Nudge as BundleNudge, type BundleOffer, type BundleOfferResponse, type BundleOfferStatus, type Quote as BundleQuote, type CartBundlePriceEntry, type CartBundlePriceResult, type CartContextValue, type CartItem, type CartItemComposition, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type CartSuggestionsResponse, type ComposedCourseBundleCartItem, type CountTier, type CourseDetail, type CoursesById, type EvaluationBasis, type FixedOffer, type FixedPriceTier, type FlatPercentageBasis, type Gap, type MatchedTierBasis, type MissingPrerequisite, type PerItemBasis, type PrerequisiteProduct, type ProductVariant, type RuleOffer, type UseBundleOfferResult, fixedQuote, next, quote, quoteOne, toComposedBundleCheckoutFragment, useBundleOffer, useCart, useCartBundlePrice, useCartPrerequisites, useCartProducts, useCartSuggestions };

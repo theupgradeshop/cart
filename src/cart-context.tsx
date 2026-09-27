@@ -9,7 +9,7 @@ import {
   useCallback,
   type ReactNode,
 } from 'react';
-import { CartContextValue, CartConfig, CartState } from './types';
+import { CartContextValue, CartConfig, CartState, ComposedCourseBundleCartItem } from './types';
 import { cartReducer, initialCartState } from './cart-reducer';
 import { migrateCartStorage } from './migrate-storage';
 
@@ -43,11 +43,16 @@ export function CartProvider({
   useEffect(() => {
     try {
       const raw = localStorage.getItem(storageKey);
-      const items = migrateCartStorage(raw);
+      const { items, composedBundle } = migrateCartStorage(raw);
       if (items.length > 0) {
         dispatch({ type: 'LOAD_ITEMS', items });
-        // Re-save in new format (overwrites old format)
-        localStorage.setItem(storageKey, JSON.stringify(items));
+      }
+      if (composedBundle) {
+        dispatch({ type: 'LOAD_COMPOSED_BUNDLE', composedBundle });
+      }
+      if (items.length > 0 || composedBundle) {
+        // Re-save in current format (overwrites any legacy/old-envelope format)
+        localStorage.setItem(storageKey, JSON.stringify({ items, composedBundle }));
       }
     } catch {
       // localStorage unavailable (SSR, private mode) — proceed with empty cart
@@ -55,15 +60,15 @@ export function CartProvider({
     setHydrated(true);
   }, [storageKey]);
 
-  // Persist to localStorage on items change (after hydration only)
+  // Persist to localStorage on items/composedBundle change (after hydration only)
   useEffect(() => {
     if (!hydrated) return;
     try {
-      localStorage.setItem(storageKey, JSON.stringify(state.items));
+      localStorage.setItem(storageKey, JSON.stringify({ items: state.items, composedBundle: state.composedBundle }));
     } catch {
       // ignore
     }
-  }, [state.items, hydrated, storageKey]);
+  }, [state.items, state.composedBundle, hydrated, storageKey]);
 
   const addItem = useCallback((slug: string, quantity = 1, variantId?: string) => {
     dispatch({ type: 'ADD_ITEM', slug, quantity, variantId });
@@ -82,6 +87,16 @@ export function CartProvider({
     try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
   }, [storageKey]);
 
+  // Replaces any existing composed-bundle line — a cart holds at most one (checkout
+  // accepts a single `composedBundle: { courseIds }` per order).
+  const setComposedBundle = useCallback((bundle: ComposedCourseBundleCartItem) => {
+    dispatch({ type: 'SET_COMPOSED_BUNDLE', composedBundle: bundle });
+  }, []);
+
+  const clearComposedBundle = useCallback(() => {
+    dispatch({ type: 'CLEAR_COMPOSED_BUNDLE' });
+  }, []);
+
   const openCart = useCallback(() => dispatch({ type: 'OPEN_CART' }), []);
   const closeCart = useCallback(() => dispatch({ type: 'CLOSE_CART' }), []);
   const toggleCart = useCallback(() => dispatch({ type: 'TOGGLE_CART' }), []);
@@ -90,12 +105,15 @@ export function CartProvider({
 
   const value: CartContextValue = {
     items: state.items,
+    composedBundle: state.composedBundle,
     isOpen: state.isOpen,
     itemCount,
     addItem,
     removeItem,
     updateQuantity,
     clearCart,
+    setComposedBundle,
+    clearComposedBundle,
     openCart,
     closeCart,
     toggleCart,

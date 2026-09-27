@@ -43,14 +43,36 @@ export interface CartProduct {
   variantId?: string;         // Merged from CartItem
 }
 
+/**
+ * The cart's single composed-course-bundle line (courses-bundles storefront spec, U3).
+ * At most ONE of these exists in a cart at a time -- setting a new one replaces the
+ * previous, matching checkout's own contract, which accepts one `composedBundle`
+ * (`{ courseIds }`) per order. Kept OUT of the `items` array on purpose: `items` holds
+ * only ordinary product lines (`{ slug, quantity, ... }`), and every existing consumer of
+ * `items` (use-cart-products, use-cart-prerequisites, use-cart-suggestions, the reducer's
+ * slug/variantId keying) assumes exactly that shape -- folding a differently-shaped line
+ * into the same array would silently break each of them for a slug-less entry. This is
+ * "a sibling type", per the spec's own phrasing, not an extension of `CartItem`.
+ */
+export interface ComposedCourseBundleCartItem {
+  kind: 'composed-course-bundle';
+  ruleId: string;
+  courseIds: string[];
+  title: string;
+}
+
 export interface CartContextValue {
   items: CartItem[];
+  composedBundle: ComposedCourseBundleCartItem | null;
   isOpen: boolean;
   itemCount: number;          // Always available — computed from localStorage, no API call needed
   addItem: (slug: string, quantity?: number, variantId?: string) => void;
   removeItem: (slug: string, variantId?: string) => void;
   updateQuantity: (slug: string, quantity: number, variantId?: string) => void;
   clearCart: () => void;
+  /** Replaces any existing composed-bundle line -- a cart holds at most one. */
+  setComposedBundle: (bundle: ComposedCourseBundleCartItem) => void;
+  clearComposedBundle: () => void;
   openCart: () => void;
   closeCart: () => void;
   toggleCart: () => void;
@@ -64,10 +86,14 @@ export type CartAction =
   | { type: 'OPEN_CART' }
   | { type: 'CLOSE_CART' }
   | { type: 'TOGGLE_CART' }
-  | { type: 'LOAD_ITEMS'; items: CartItem[] };
+  | { type: 'LOAD_ITEMS'; items: CartItem[] }
+  | { type: 'SET_COMPOSED_BUNDLE'; composedBundle: ComposedCourseBundleCartItem }
+  | { type: 'CLEAR_COMPOSED_BUNDLE' }
+  | { type: 'LOAD_COMPOSED_BUNDLE'; composedBundle: ComposedCourseBundleCartItem | null };
 
 export interface CartState {
   items: CartItem[];
+  composedBundle: ComposedCourseBundleCartItem | null;
   isOpen: boolean;
 }
 

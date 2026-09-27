@@ -1,0 +1,1071 @@
+{
+  "cases": [
+    {
+      "name": "tiered_by_count: qualifying, picks highest tier <= size",
+      "rules": [
+        {
+          "id": "r-tiered-1",
+          "minItems": 2,
+          "maxItems": 6,
+          "eligibleCourseIds": "all",
+          "scheme": "tiered_by_count",
+          "tiers": [
+            {
+              "count": 2,
+              "percentOff": 10
+            },
+            {
+              "count": 4,
+              "percentOff": 20
+            },
+            {
+              "count": 6,
+              "percentOff": 30
+            }
+          ]
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 10000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 12000,
+          "owned": false
+        },
+        {
+          "id": "c3",
+          "listPriceMinor": 9000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 27900,
+        "discountMinor": 3100,
+        "appliedRuleId": "r-tiered-1",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "flat_percentage: qualifying",
+      "rules": [
+        {
+          "id": "r-flat-1",
+          "minItems": 2,
+          "maxItems": 5,
+          "eligibleCourseIds": "all",
+          "scheme": "flat_percentage",
+          "percentOff": 15
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 5000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 7000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 10200,
+        "discountMinor": 1800,
+        "appliedRuleId": "r-flat-1",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "fixed_price_per_tier: exact-count match, real saving",
+      "rules": [
+        {
+          "id": "r-fixed-1",
+          "minItems": 2,
+          "maxItems": 5,
+          "eligibleCourseIds": "all",
+          "scheme": "fixed_price_per_tier",
+          "tiers": [
+            {
+              "count": 2,
+              "fixedPriceMinor": 9000
+            },
+            {
+              "count": 4,
+              "fixedPriceMinor": 15000
+            }
+          ]
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 6000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 6000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 9000,
+        "discountMinor": 3000,
+        "appliedRuleId": "r-fixed-1",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "per_course_contribution: every course has an override price",
+      "rules": [
+        {
+          "id": "r-contrib-1",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "per_course_contribution",
+          "coursePricesMinor": {
+            "c1": 4000,
+            "c2": 5000
+          }
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 6000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 7000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 9000,
+        "discountMinor": 4000,
+        "appliedRuleId": "r-contrib-1",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "per_course_contribution: fallback to list price when override missing",
+      "rules": [
+        {
+          "id": "r-contrib-2",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "per_course_contribution",
+          "coursePricesMinor": {
+            "c1": 4000
+          }
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 6000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 7000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 11000,
+        "discountMinor": 2000,
+        "appliedRuleId": "r-contrib-2",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "tiered_by_count: one owned course counts toward size, not charged",
+      "rules": [
+        {
+          "id": "r-tiered-2",
+          "minItems": 3,
+          "maxItems": 5,
+          "eligibleCourseIds": "all",
+          "scheme": "tiered_by_count",
+          "tiers": [
+            {
+              "count": 3,
+              "percentOff": 25
+            }
+          ]
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 8000,
+          "owned": true
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 9000,
+          "owned": false
+        },
+        {
+          "id": "c3",
+          "listPriceMinor": 7000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 12000,
+        "discountMinor": 4000,
+        "appliedRuleId": "r-tiered-2",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "fixed_price_per_tier: owned course counts toward exact tier",
+      "rules": [
+        {
+          "id": "r-fixed-2",
+          "minItems": 3,
+          "maxItems": 3,
+          "eligibleCourseIds": "all",
+          "scheme": "fixed_price_per_tier",
+          "tiers": [
+            {
+              "count": 3,
+              "fixedPriceMinor": 10000
+            }
+          ]
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 5000,
+          "owned": true
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 6000,
+          "owned": false
+        },
+        {
+          "id": "c3",
+          "listPriceMinor": 7000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 10000,
+        "discountMinor": 3000,
+        "appliedRuleId": "r-fixed-2",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "tiered_by_count: selection exactly at max",
+      "rules": [
+        {
+          "id": "r-tiered-3",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "tiered_by_count",
+          "tiers": [
+            {
+              "count": 2,
+              "percentOff": 10
+            },
+            {
+              "count": 4,
+              "percentOff": 20
+            }
+          ]
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 1000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 2000,
+          "owned": false
+        },
+        {
+          "id": "c3",
+          "listPriceMinor": 3000,
+          "owned": false
+        },
+        {
+          "id": "c4",
+          "listPriceMinor": 4000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 8000,
+        "discountMinor": 2000,
+        "appliedRuleId": "r-tiered-3",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "below min: no live rule matches, full price, no suppression",
+      "rules": [
+        {
+          "id": "r-tiered-4",
+          "minItems": 3,
+          "maxItems": 5,
+          "eligibleCourseIds": "all",
+          "scheme": "tiered_by_count",
+          "tiers": [
+            {
+              "count": 3,
+              "percentOff": 10
+            }
+          ]
+        },
+        {
+          "id": "r-flat-2",
+          "minItems": 4,
+          "maxItems": 6,
+          "eligibleCourseIds": "all",
+          "scheme": "flat_percentage",
+          "percentOff": 20
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 3000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 4000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 7000,
+        "discountMinor": 0,
+        "appliedRuleId": null,
+        "suppressed": false
+      }
+    },
+    {
+      "name": "fixed_price_per_tier: gap below lowest tier",
+      "rules": [
+        {
+          "id": "r-fixed-3",
+          "minItems": 1,
+          "maxItems": 6,
+          "eligibleCourseIds": "all",
+          "scheme": "fixed_price_per_tier",
+          "tiers": [
+            {
+              "count": 3,
+              "fixedPriceMinor": 10000
+            },
+            {
+              "count": 5,
+              "fixedPriceMinor": 15000
+            }
+          ]
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 4000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 4000,
+        "discountMinor": 0,
+        "appliedRuleId": null,
+        "suppressed": false
+      }
+    },
+    {
+      "name": "fixed_price_per_tier: gap between tiers",
+      "rules": [
+        {
+          "id": "r-fixed-4",
+          "minItems": 1,
+          "maxItems": 6,
+          "eligibleCourseIds": "all",
+          "scheme": "fixed_price_per_tier",
+          "tiers": [
+            {
+              "count": 2,
+              "fixedPriceMinor": 8000
+            },
+            {
+              "count": 4,
+              "fixedPriceMinor": 14000
+            }
+          ]
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 4000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 4000,
+          "owned": false
+        },
+        {
+          "id": "c3",
+          "listPriceMinor": 4000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 12000,
+        "discountMinor": 0,
+        "appliedRuleId": null,
+        "suppressed": false
+      }
+    },
+    {
+      "name": "fixed_price_per_tier: gap above highest tier, within max",
+      "rules": [
+        {
+          "id": "r-fixed-5",
+          "minItems": 1,
+          "maxItems": 6,
+          "eligibleCourseIds": "all",
+          "scheme": "fixed_price_per_tier",
+          "tiers": [
+            {
+              "count": 2,
+              "fixedPriceMinor": 8000
+            },
+            {
+              "count": 4,
+              "fixedPriceMinor": 14000
+            }
+          ]
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 4000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 4000,
+          "owned": false
+        },
+        {
+          "id": "c3",
+          "listPriceMinor": 4000,
+          "owned": false
+        },
+        {
+          "id": "c4",
+          "listPriceMinor": 4000,
+          "owned": false
+        },
+        {
+          "id": "c5",
+          "listPriceMinor": 4000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 20000,
+        "discountMinor": 0,
+        "appliedRuleId": null,
+        "suppressed": false
+      }
+    },
+    {
+      "name": "alt cheaper: primary tiered, alt flat is cheaper for this selection",
+      "rules": [
+        {
+          "id": "r-primary-1",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "tiered_by_count",
+          "tiers": [
+            {
+              "count": 2,
+              "percentOff": 5
+            }
+          ]
+        },
+        {
+          "id": "r-alt-1",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "flat_percentage",
+          "percentOff": 40
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 10000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 10000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 12000,
+        "discountMinor": 8000,
+        "appliedRuleId": "r-alt-1",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "tie: primary and alt produce equal total, lowest id wins",
+      "rules": [
+        {
+          "id": "r-tie-b",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "flat_percentage",
+          "percentOff": 20
+        },
+        {
+          "id": "r-tie-a",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "flat_percentage",
+          "percentOff": 20
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 10000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 10000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 16000,
+        "discountMinor": 4000,
+        "appliedRuleId": "r-tie-a",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "suppression: tiered 0% tier -> non_positive_discount, full price shown",
+      "rules": [
+        {
+          "id": "r-tiered-5",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "tiered_by_count",
+          "tiers": [
+            {
+              "count": 2,
+              "percentOff": 0
+            }
+          ]
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 5000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 5000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 10000,
+        "discountMinor": 0,
+        "appliedRuleId": null,
+        "suppressed": true
+      }
+    },
+    {
+      "name": "suppression: flat percentOff > 100 drives total negative -> negative_total",
+      "rules": [
+        {
+          "id": "r-flat-3",
+          "minItems": 1,
+          "maxItems": 3,
+          "eligibleCourseIds": "all",
+          "scheme": "flat_percentage",
+          "percentOff": 150
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 5000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 5000,
+        "discountMinor": 0,
+        "appliedRuleId": null,
+        "suppressed": true
+      }
+    },
+    {
+      "name": "tiered_by_count: size in range but below lowest tier -> matched null -> suppressed",
+      "rules": [
+        {
+          "id": "r-tiered-6",
+          "minItems": 1,
+          "maxItems": 5,
+          "eligibleCourseIds": "all",
+          "scheme": "tiered_by_count",
+          "tiers": [
+            {
+              "count": 3,
+              "percentOff": 20
+            }
+          ]
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 5000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 5000,
+        "discountMinor": 0,
+        "appliedRuleId": null,
+        "suppressed": true
+      }
+    },
+    {
+      "name": "eligibility: an alt that does not cover the whole selection is pruned",
+      "rules": [
+        {
+          "id": "r-primary-2",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "flat_percentage",
+          "percentOff": 10
+        },
+        {
+          "id": "r-alt-2",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": [
+            "c1",
+            "c2"
+          ],
+          "scheme": "flat_percentage",
+          "percentOff": 25
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 5000,
+          "owned": false
+        },
+        {
+          "id": "c3",
+          "listPriceMinor": 5000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 9000,
+        "discountMinor": 1000,
+        "appliedRuleId": "r-primary-2",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "eligibility: \"all\" sentinel matches any selected course",
+      "rules": [
+        {
+          "id": "r-all-1",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "flat_percentage",
+          "percentOff": 10
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "zz-course",
+          "listPriceMinor": 5000,
+          "owned": false
+        },
+        {
+          "id": "aa-course",
+          "listPriceMinor": 5000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 9000,
+        "discountMinor": 1000,
+        "appliedRuleId": "r-all-1",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "tiered_by_count: two owned courses, plural, still charged correctly",
+      "rules": [
+        {
+          "id": "r-tiered-7",
+          "minItems": 3,
+          "maxItems": 6,
+          "eligibleCourseIds": "all",
+          "scheme": "tiered_by_count",
+          "tiers": [
+            {
+              "count": 3,
+              "percentOff": 10
+            }
+          ]
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 5000,
+          "owned": true
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 5000,
+          "owned": true
+        },
+        {
+          "id": "c3",
+          "listPriceMinor": 5000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 4500,
+        "discountMinor": 500,
+        "appliedRuleId": "r-tiered-7",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "fixed_price_per_tier: no saving, set price above full price -> suppressed",
+      "rules": [
+        {
+          "id": "r-fixed-6",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "fixed_price_per_tier",
+          "tiers": [
+            {
+              "count": 2,
+              "fixedPriceMinor": 30000
+            }
+          ]
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 5000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 5000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 10000,
+        "discountMinor": 0,
+        "appliedRuleId": null,
+        "suppressed": true
+      }
+    },
+    {
+      "name": "per_course_contribution: contrib prices sum above list price total -> suppressed",
+      "rules": [
+        {
+          "id": "r-contrib-3",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "per_course_contribution",
+          "coursePricesMinor": {
+            "c1": 6000,
+            "c2": 6000
+          }
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 5000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 5000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 10000,
+        "discountMinor": 0,
+        "appliedRuleId": null,
+        "suppressed": true
+      }
+    },
+    {
+      "name": "tiered_by_count: size between tiers picks highest tier <= size, not the higher one",
+      "rules": [
+        {
+          "id": "r-tiered-8",
+          "minItems": 2,
+          "maxItems": 6,
+          "eligibleCourseIds": "all",
+          "scheme": "tiered_by_count",
+          "tiers": [
+            {
+              "count": 2,
+              "percentOff": 10
+            },
+            {
+              "count": 4,
+              "percentOff": 20
+            },
+            {
+              "count": 6,
+              "percentOff": 30
+            }
+          ]
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 3000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 3000,
+          "owned": false
+        },
+        {
+          "id": "c3",
+          "listPriceMinor": 3000,
+          "owned": false
+        },
+        {
+          "id": "c4",
+          "listPriceMinor": 3000,
+          "owned": false
+        },
+        {
+          "id": "c5",
+          "listPriceMinor": 3000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 12000,
+        "discountMinor": 3000,
+        "appliedRuleId": "r-tiered-8",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "flat_percentage: rounding, odd full price times 33%",
+      "rules": [
+        {
+          "id": "r-flat-4",
+          "minItems": 1,
+          "maxItems": 3,
+          "eligibleCourseIds": "all",
+          "scheme": "flat_percentage",
+          "percentOff": 33
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 9901,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 6634,
+        "discountMinor": 3267,
+        "appliedRuleId": "r-flat-4",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "tie among two alts (primary is worse), lowest alt id wins",
+      "rules": [
+        {
+          "id": "r-primary-3",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "flat_percentage",
+          "percentOff": 5
+        },
+        {
+          "id": "r-alt-z",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "flat_percentage",
+          "percentOff": 50
+        },
+        {
+          "id": "r-alt-y",
+          "minItems": 2,
+          "maxItems": 4,
+          "eligibleCourseIds": "all",
+          "scheme": "flat_percentage",
+          "percentOff": 50
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 10000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 10000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 10000,
+        "discountMinor": 10000,
+        "appliedRuleId": "r-alt-y",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "flat_percentage: full price computed only from charged (unowned) items",
+      "rules": [
+        {
+          "id": "r-flat-5",
+          "minItems": 3,
+          "maxItems": 5,
+          "eligibleCourseIds": "all",
+          "scheme": "flat_percentage",
+          "percentOff": 10
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 9000,
+          "owned": true
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 5000,
+          "owned": false
+        },
+        {
+          "id": "c3",
+          "listPriceMinor": 5000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 9000,
+        "discountMinor": 1000,
+        "appliedRuleId": "r-flat-5",
+        "suppressed": false
+      }
+    },
+    {
+      "name": "fixed_price_per_tier: min === max, exact single-size bundle",
+      "rules": [
+        {
+          "id": "r-fixed-7",
+          "minItems": 3,
+          "maxItems": 3,
+          "eligibleCourseIds": "all",
+          "scheme": "fixed_price_per_tier",
+          "tiers": [
+            {
+              "count": 3,
+              "fixedPriceMinor": 12000
+            }
+          ]
+        }
+      ],
+      "chosenCourses": [
+        {
+          "id": "c1",
+          "listPriceMinor": 5000,
+          "owned": false
+        },
+        {
+          "id": "c2",
+          "listPriceMinor": 5000,
+          "owned": false
+        },
+        {
+          "id": "c3",
+          "listPriceMinor": 5000,
+          "owned": false
+        }
+      ],
+      "expected": {
+        "totalMinor": 12000,
+        "discountMinor": 3000,
+        "appliedRuleId": "r-fixed-7",
+        "suppressed": false
+      }
+    }
+  ]
+}

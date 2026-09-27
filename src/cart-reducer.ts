@@ -5,7 +5,7 @@ export function itemKey(slug: string, variantId?: string): string {
   return variantId ? `${slug}::${variantId}` : slug;
 }
 
-export const initialCartState: CartState = { items: [], isOpen: false };
+export const initialCartState: CartState = { items: [], composedBundle: null, isOpen: false };
 
 export function cartReducer(state: CartState, action: CartAction): CartState {
   switch (action.type) {
@@ -50,7 +50,16 @@ export function cartReducer(state: CartState, action: CartAction): CartState {
     }
 
     case 'CLEAR_CART':
-      return { ...state, items: [] };
+      return { ...state, items: [], composedBundle: null };
+
+    case 'SET_COMPOSED_BUNDLE':
+      return { ...state, composedBundle: action.composedBundle };
+
+    case 'CLEAR_COMPOSED_BUNDLE':
+      return { ...state, composedBundle: null };
+
+    case 'LOAD_COMPOSED_BUNDLE':
+      return { ...state, composedBundle: action.composedBundle };
 
     case 'OPEN_CART':
       return { ...state, isOpen: true };

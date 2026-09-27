@@ -1,10 +1,12 @@
 # @upgradeshop/cart
 
 ID-only cart state management with live price fetching for Upgrade Shop
-customer websites. The cart itself only ever stores `{ slug, quantity,
-variantId?, composition? }` in `localStorage` — no price, no name, nothing
-that can go stale. Live product data (price, name, images, availability) is
-fetched separately and merged in at read time.
+customer websites. The cart itself only ever stores product lines
+(`{ slug, quantity, variantId?, composition? }`) plus, since U3, at most one
+composed-course-bundle line, as `{ items, composedBundle }` in
+`localStorage` — no price, no name, nothing that can go stale. Live product
+data (price, name, images, availability) is fetched separately and merged in
+at read time.
 
 Consumed by pinned git ref from each customer site's `package.json` (e.g.
 `github:theupgradeshop/cart#<sha>` or `#v1.0.1`) — see
@@ -48,6 +50,10 @@ that already carries one.**
   `openCart`/`closeCart`/`toggleCart`, `itemCount`.
 - `useCartProducts(domain)` (`src/use-cart-products.ts`) — merges the cart's
   slugs with live product data from `GET /api/public/products`.
+- `toComposedBundleCheckoutFragment(bundle)` (`src/composed-bundle.ts`) —
+  see "Composed course bundle" below.
+- Bundle pricing engine (`src/bundle-engine.ts`) and `useBundleOffer`
+  (`src/use-bundle-offer.ts`) — see "Course bundle pricing engine" below.
 - `useCartSuggestions(domain)` (`src/use-cart-suggestions.ts`) — cross-sell /
   upsell / bundle-upgrade suggestions from
   `GET /api/public/cart/suggestions`, plus `applySuggestion`.
@@ -218,6 +224,69 @@ composition's `includedItems` slugs (never the bundle's own slug) — the
 generic bundle-rules price endpoint prices whatever chosen-item set it's
 given, so it's the *included* items that need pricing, not the bundle
 product itself.
+
+## Composed course bundle (U3, courses-bundles storefront spec)
+
+A cart holds at most **one** composed-course-bundle line at a time, kept
+**out of** the `items` array on purpose — see the doc comment on
+`ComposedCourseBundleCartItem` in `src/types.ts`. `items` holds only ordinary
+product lines, and every existing consumer of `items` (`useCartProducts`,
+`useCartPrerequisites`, `useCartSuggestions`, the reducer's slug/variantId
+keying) assumes exactly that shape; folding a differently-shaped line into
+the same array would silently break each of them for a slug-less entry.
+
+```ts
+composedBundle?: {
+  kind: 'composed-course-bundle';
+  ruleId: string;
+  courseIds: string[];
+  title: string;
+} | null
+```
+
+`useCart()` exposes it alongside `items`: `composedBundle`,
+`setComposedBundle(bundle)` (replaces any existing one — a cart holds at
+most one), `clearComposedBundle()`. `clearCart()` clears both. It persists
+in the same `storageKey` as `items`, under a top-level envelope,
+`{ items, composedBundle }` — `migrateCartStorage` (`src/migrate-storage.ts`)
+reads both this envelope AND every prior bare-array format (Bomdia,
+Camoflash, pre-U3 current), always resolving `composedBundle: null` for the
+latter, since none of them ever wrote one. An old stored cart therefore
+loads with exactly the items it always had, nothing more.
+
+`toComposedBundleCheckoutFragment(composedBundle)` (`src/composed-bundle.ts`)
+turns the line into the checkout body fragment the dashboard's checkout
+route expects, `{ composedBundle: { courseIds } }`, or `undefined` when there
+is no such line — spread it straight into a checkout request body.
+
+## Course bundle pricing engine (U3, courses-bundles storefront spec)
+
+`src/bundle-engine.ts` is a pure, framework-free client mirror of the
+dashboard's server pricing (`evaluateBundleRules` +
+`guardNonPositiveDiscount`) for a course bundle rule — see that file's own
+header for the exact behaviour it reproduces (all four schemes, D1's
+exact-count `fixed_price_per_tier`, D2's non-positive-discount/negative-total
+suppression, rounding, ties) and the one deliberate, documented divergence
+from the generic design reference it otherwise ports directly (a "gap" or
+below-minimum selection on the primary offer never falls through to check
+alternates — the storefront's own UX decision, not a server pricing rule).
+All money is in MINOR units. Exports: `quoteOne`, `quote`, `next`,
+`fixedQuote`, plus the `RuleOffer`/`FixedOffer`/`BundleOffer`/`CourseDetail`/
+`CoursesById`/`Quote`/`Nudge`/`FixedQuote`/`Gap`/`EvaluationBasis` types.
+
+Parity with the server is enforced by a shared golden fixture
+(`tests/fixtures/bundle-pricing-golden.json`, sha256-pinned in
+`tests/bundle-engine-golden.test.ts`), generated from and byte-identical to
+the dashboard's own copy (`src/lib/store/__fixtures__/bundle-pricing-golden.json`,
+`src/lib/store/__tests__/bundle-pricing-golden.test.ts`) — regenerate both
+together, never one alone.
+
+`useBundleOffer(url)` (`src/use-bundle-offer.ts`) fetches a single bundle
+offer from the site's own route (contract:
+`2026-09-27-course-bundles-storefront-and-pe-block.md`), holds the shopper's
+`sel` (resetting on `url` change), and returns `{ status, currency, offer,
+courses, alts, owned, sel, setSel, toggle, quote, next, loading, error }`.
+No UI, no React-DOM rendering — that's per site (courses-bundles spec, U4).
 
 ## Development
 

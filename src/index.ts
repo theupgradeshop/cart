@@ -9,6 +9,7 @@ export type { CartBundlePriceResult, CartBundlePriceEntry } from './use-cart-bun
 export type {
   CartItem,
   CartItemComposition,
+  ComposedCourseBundleCartItem,
   CartProduct,
   CartContextValue,
   ProductVariant,
@@ -17,3 +18,37 @@ export type {
   CartSuggestionType,
   CartSuggestionsResponse,
 } from './types';
+export { toComposedBundleCheckoutFragment } from './composed-bundle';
+
+// Bundle pricing engine (courses-bundles storefront spec, U3) — pure, mirrors the
+// dashboard's server evaluator + guard exactly. See src/bundle-engine.ts.
+export {
+  quoteOne,
+  quote,
+  next,
+  fixedQuote,
+} from './bundle-engine';
+export type {
+  CountTier,
+  FixedPriceTier,
+  RuleOffer,
+  FixedOffer,
+  BundleOffer,
+  CourseDetail,
+  CoursesById,
+  MatchedTierBasis,
+  FlatPercentageBasis,
+  PerItemBasis,
+  EvaluationBasis,
+  Gap,
+  Quote as BundleQuote,
+  Nudge as BundleNudge,
+  FixedQuote as BundleFixedQuote,
+} from './bundle-engine';
+
+export { useBundleOffer } from './use-bundle-offer';
+export type {
+  BundleOfferStatus,
+  BundleOfferResponse,
+  UseBundleOfferResult,
+} from './use-bundle-offer';

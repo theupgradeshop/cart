@@ -14,7 +14,7 @@ import {
 function itemKey(slug, variantId) {
   return variantId ? `${slug}::${variantId}` : slug;
 }
-var initialCartState = { items: [], isOpen: false };
+var initialCartState = { items: [], composedBundle: null, isOpen: false };
 function cartReducer(state, action) {
   switch (action.type) {
     case "ADD_ITEM": {
@@ -53,7 +53,13 @@ function cartReducer(state, action) {
       };
     }
     case "CLEAR_CART":
-      return { ...state, items: [] };
+      return { ...state, items: [], composedBundle: null };
+    case "SET_COMPOSED_BUNDLE":
+      return { ...state, composedBundle: action.composedBundle };
+    case "CLEAR_COMPOSED_BUNDLE":
+      return { ...state, composedBundle: null };
+    case "LOAD_COMPOSED_BUNDLE":
+      return { ...state, composedBundle: action.composedBundle };
     case "OPEN_CART":
       return { ...state, isOpen: true };
     case "CLOSE_CART":
@@ -77,15 +83,17 @@ function isValidComposition(value) {
     (item) => typeof item === "object" && item !== null && typeof item.slug === "string" && typeof item.quantity === "number"
   );
 }
-function migrateCartStorage(raw) {
-  if (!raw) return [];
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(parsed) || parsed.length === 0) return [];
+function isValidComposedBundle(value) {
+  if (typeof value !== "object" || value === null) return false;
+  const bundle = value;
+  if (bundle.kind !== "composed-course-bundle") return false;
+  if (typeof bundle.ruleId !== "string") return false;
+  if (typeof bundle.title !== "string") return false;
+  if (!Array.isArray(bundle.courseIds)) return false;
+  return bundle.courseIds.every((id) => typeof id === "string");
+}
+function migrateItemsArray(parsed) {
+  if (parsed.length === 0) return [];
   const first = parsed[0];
   if (first.product && typeof first.product.slug === "string") {
     return parsed.filter((item) => {
@@ -114,6 +122,23 @@ function migrateCartStorage(raw) {
   }
   return [];
 }
+function migrateCartStorage(raw) {
+  if (!raw) return { items: [], composedBundle: null };
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { items: [], composedBundle: null };
+  }
+  if (!Array.isArray(parsed) && typeof parsed === "object" && parsed !== null && Array.isArray(parsed.items)) {
+    const envelope = parsed;
+    const items = migrateItemsArray(envelope.items);
+    const composedBundle = isValidComposedBundle(envelope.composedBundle) ? envelope.composedBundle : null;
+    return { items, composedBundle };
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return { items: [], composedBundle: null };
+  return { items: migrateItemsArray(parsed), composedBundle: null };
+}
 
 // src/cart-context.tsx
 import { jsx } from "react/jsx-runtime";
@@ -131,10 +156,15 @@ function CartProvider({
   useEffect(() => {
     try {
       const raw = localStorage.getItem(storageKey);
-      const items = migrateCartStorage(raw);
+      const { items, composedBundle } = migrateCartStorage(raw);
       if (items.length > 0) {
         dispatch({ type: "LOAD_ITEMS", items });
-        localStorage.setItem(storageKey, JSON.stringify(items));
+      }
+      if (composedBundle) {
+        dispatch({ type: "LOAD_COMPOSED_BUNDLE", composedBundle });
+      }
+      if (items.length > 0 || composedBundle) {
+        localStorage.setItem(storageKey, JSON.stringify({ items, composedBundle }));
       }
     } catch {
     }
@@ -143,10 +173,10 @@ function CartProvider({
   useEffect(() => {
     if (!hydrated) return;
     try {
-      localStorage.setItem(storageKey, JSON.stringify(state.items));
+      localStorage.setItem(storageKey, JSON.stringify({ items: state.items, composedBundle: state.composedBundle }));
     } catch {
     }
-  }, [state.items, hydrated, storageKey]);
+  }, [state.items, state.composedBundle, hydrated, storageKey]);
   const addItem = useCallback((slug, quantity = 1, variantId) => {
     dispatch({ type: "ADD_ITEM", slug, quantity, variantId });
   }, []);
@@ -163,18 +193,27 @@ function CartProvider({
     } catch {
     }
   }, [storageKey]);
+  const setComposedBundle = useCallback((bundle) => {
+    dispatch({ type: "SET_COMPOSED_BUNDLE", composedBundle: bundle });
+  }, []);
+  const clearComposedBundle = useCallback(() => {
+    dispatch({ type: "CLEAR_COMPOSED_BUNDLE" });
+  }, []);
   const openCart = useCallback(() => dispatch({ type: "OPEN_CART" }), []);
   const closeCart = useCallback(() => dispatch({ type: "CLOSE_CART" }), []);
   const toggleCart = useCallback(() => dispatch({ type: "TOGGLE_CART" }), []);
   const itemCount = state.items.reduce((sum, i) => sum + i.quantity, 0);
   const value = {
     items: state.items,
+    composedBundle: state.composedBundle,
     isOpen: state.isOpen,
     itemCount,
     addItem,
     removeItem,
     updateQuantity,
     clearCart,
+    setComposedBundle,
+    clearComposedBundle,
     openCart,
     closeCart,
     toggleCart
@@ -607,9 +646,9 @@ function useCartBundlePrice(domain) {
       fetchBundlePrice(apiBaseUrl, domain, composition).then((data) => {
         if (cancelled) return;
         setResults((prev) => {
-          const next = new Map(prev);
-          next.set(key, data);
-          return next;
+          const next2 = new Map(prev);
+          next2.set(key, data);
+          return next2;
         });
         setError(null);
       }).catch((err) => {
@@ -618,9 +657,9 @@ function useCartBundlePrice(domain) {
       }).finally(() => {
         if (cancelled) return;
         setLoadingKeys((prev) => {
-          const next = new Set(prev);
-          next.delete(key);
-          return next;
+          const next2 = new Set(prev);
+          next2.delete(key);
+          return next2;
         });
       });
     }
@@ -642,8 +681,321 @@ function useCartBundlePrice(domain) {
   };
   return { priceFor, isLoading: loadingKeys.size > 0, error };
 }
+
+// src/composed-bundle.ts
+function toComposedBundleCheckoutFragment(composedBundle) {
+  if (!composedBundle) return void 0;
+  return { composedBundle: { courseIds: composedBundle.courseIds } };
+}
+
+// src/bundle-engine.ts
+function isEligible(offer, id) {
+  return offer.eligible.includes(id);
+}
+function pickHighestTier(tiers, size) {
+  let best = null;
+  for (const tier of tiers) {
+    if (tier.count <= size && (best === null || tier.count > best.count)) best = tier;
+  }
+  return best;
+}
+function pickExactTier(tiers, size) {
+  return tiers.find((t) => t.count === size) ?? null;
+}
+function rawCandidate(offer, pickedIds, ownIds, coursesById) {
+  const size = pickedIds.length + ownIds.length;
+  if (size < offer.min || size > offer.max) return null;
+  if (![...pickedIds, ...ownIds].every((id) => isEligible(offer, id))) return null;
+  const fullMinor = pickedIds.reduce((sum, id) => sum + coursesById[id].listPriceMinor, 0);
+  switch (offer.scheme) {
+    case "tiered_by_count": {
+      const tier = pickHighestTier(offer.tiers, size);
+      const discountMinor = tier ? Math.round(fullMinor * tier.percentOff / 100) : 0;
+      return {
+        ruleId: offer.id,
+        totalMinor: fullMinor - discountMinor,
+        discountMinor,
+        basis: { scheme: "tiered_by_count", tier }
+      };
+    }
+    case "flat_percentage": {
+      const discountMinor = Math.round(fullMinor * offer.percentOff / 100);
+      return {
+        ruleId: offer.id,
+        totalMinor: fullMinor - discountMinor,
+        discountMinor,
+        basis: { scheme: "flat_percentage", percentOff: offer.percentOff }
+      };
+    }
+    case "fixed_price_per_tier": {
+      const tier = pickExactTier(offer.tiers, size);
+      if (!tier) {
+        const lo = offer.tiers.filter((t) => t.count < size).sort((a, b) => b.count - a.count)[0] ?? null;
+        const hi = offer.tiers.filter((t) => t.count > size && t.count <= offer.max).sort((a, b) => a.count - b.count)[0] ?? null;
+        return { lo, hi };
+      }
+      return {
+        ruleId: offer.id,
+        totalMinor: tier.fixedPriceMinor,
+        discountMinor: fullMinor - tier.fixedPriceMinor,
+        basis: { scheme: "fixed_price_per_tier", tier }
+      };
+    }
+    case "per_course_contribution": {
+      const perItemMinor = {};
+      let totalMinor = 0;
+      for (const id of pickedIds) {
+        const price = offer.coursePricesMinor[id] ?? coursesById[id].listPriceMinor;
+        perItemMinor[id] = price;
+        totalMinor += price;
+      }
+      return {
+        ruleId: offer.id,
+        totalMinor,
+        discountMinor: fullMinor - totalMinor,
+        basis: { scheme: "per_course_contribution", perItemMinor }
+      };
+    }
+  }
+}
+function isGap(x) {
+  return x !== null && !("ruleId" in x);
+}
+function guard(winner, fullMinor) {
+  if (winner === null) {
+    return { totalMinor: fullMinor, discountMinor: 0, appliedRuleId: null, basis: null };
+  }
+  if (winner.totalMinor < 0 || winner.discountMinor <= 0) {
+    return { totalMinor: fullMinor, discountMinor: 0, appliedRuleId: null, basis: null };
+  }
+  return {
+    totalMinor: winner.totalMinor,
+    discountMinor: winner.discountMinor,
+    appliedRuleId: winner.ruleId,
+    basis: winner.basis
+  };
+}
+function quoteOne(offer, sel, owned, coursesById) {
+  const own = owned.filter((id) => isEligible(offer, id));
+  const picked = sel.filter((id) => isEligible(offer, id) && !own.includes(id));
+  const count = picked.length + own.length;
+  const fullMinor = picked.reduce((sum, id) => sum + coursesById[id].listPriceMinor, 0);
+  const short = Math.max(0, offer.min - count);
+  const atMax = count >= offer.max;
+  const base = {
+    count,
+    own,
+    picked,
+    fullMinor,
+    payMinor: fullMinor,
+    offMinor: 0,
+    pct: 0,
+    valid: false,
+    short,
+    atMax,
+    noSaving: false,
+    basis: null,
+    wonOfferId: null,
+    gap: null
+  };
+  if (count < offer.min || count > offer.max) return base;
+  const raw = rawCandidate(offer, picked, own, coursesById);
+  if (isGap(raw)) return { ...base, gap: raw };
+  const guarded = guard(raw, fullMinor);
+  const noSaving = guarded.appliedRuleId === null;
+  return {
+    ...base,
+    valid: true,
+    basis: guarded.basis,
+    noSaving,
+    payMinor: guarded.totalMinor,
+    offMinor: fullMinor - guarded.totalMinor,
+    pct: fullMinor > 0 ? Math.round((fullMinor - guarded.totalMinor) / fullMinor * 100) : 0
+  };
+}
+function quote(offer, alts, sel, owned, coursesById) {
+  const own = owned.filter((id) => isEligible(offer, id));
+  const picked = sel.filter((id) => isEligible(offer, id) && !own.includes(id));
+  const count = picked.length + own.length;
+  const fullMinor = picked.reduce((sum, id) => sum + coursesById[id].listPriceMinor, 0);
+  const short = Math.max(0, offer.min - count);
+  const atMax = count >= offer.max;
+  const base = {
+    count,
+    own,
+    picked,
+    fullMinor,
+    payMinor: fullMinor,
+    offMinor: 0,
+    pct: 0,
+    valid: false,
+    short,
+    atMax,
+    noSaving: false,
+    basis: null,
+    wonOfferId: null,
+    gap: null
+  };
+  if (count < offer.min || count > offer.max) return base;
+  const primaryRaw = rawCandidate(offer, picked, own, coursesById);
+  if (isGap(primaryRaw)) return { ...base, gap: primaryRaw };
+  const allSelected = [...picked, ...own];
+  const candidates = [];
+  if (primaryRaw !== null) candidates.push(primaryRaw);
+  for (const alt of alts) {
+    if (!allSelected.every((id) => isEligible(alt, id))) continue;
+    const altRaw = rawCandidate(alt, picked, own, coursesById);
+    if (altRaw !== null && !isGap(altRaw)) candidates.push(altRaw);
+  }
+  let winner = null;
+  for (const candidate of candidates) {
+    if (winner === null || candidate.totalMinor < winner.totalMinor || candidate.totalMinor === winner.totalMinor && candidate.ruleId < winner.ruleId) {
+      winner = candidate;
+    }
+  }
+  const guarded = guard(winner, fullMinor);
+  const noSaving = guarded.appliedRuleId === null;
+  const wonOfferId = guarded.appliedRuleId !== null && guarded.appliedRuleId !== offer.id ? guarded.appliedRuleId : null;
+  return {
+    ...base,
+    valid: true,
+    basis: guarded.basis,
+    noSaving,
+    payMinor: guarded.totalMinor,
+    offMinor: fullMinor - guarded.totalMinor,
+    pct: fullMinor > 0 ? Math.round((fullMinor - guarded.totalMinor) / fullMinor * 100) : 0,
+    wonOfferId
+  };
+}
+function next(offer, alts, q, sel, owned, coursesById) {
+  if (!q.valid || q.atMax) return null;
+  if (offer.scheme === "tiered_by_count") {
+    const nx = offer.tiers.filter((t) => t.count > q.count && t.count <= offer.max).sort((a, b) => a.count - b.count)[0];
+    if (!nx) return null;
+    const add = nx.count - q.count;
+    let mMinor = null;
+    if (add === 1) {
+      const rest = offer.eligible.filter((id) => !sel.includes(id) && !owned.includes(id));
+      const costs = rest.map((id) => {
+        const withId = quote(offer, alts, [...sel, id], owned, coursesById);
+        return withId.payMinor - q.payMinor;
+      });
+      if (costs.length > 0) mMinor = Math.min(...costs);
+    }
+    return { kind: "tier", add, to: nx.percentOff, n: nx.count, mMinor };
+  }
+  if (offer.scheme === "fixed_price_per_tier") {
+    const nx = offer.tiers.filter((t) => t.count > q.count && t.count <= offer.max).sort((a, b) => a.count - b.count)[0];
+    if (!nx) return null;
+    return { kind: "set", add: nx.count - q.count, n: nx.count, priceMinor: nx.fixedPriceMinor };
+  }
+  return null;
+}
+function fixedQuote(offer, coursesById) {
+  const fullMinor = offer.ids.reduce((sum, id) => sum + coursesById[id].listPriceMinor, 0);
+  const payMinor = Math.min(offer.priceMinor, fullMinor);
+  const offMinor = fullMinor - payMinor;
+  return {
+    fixed: true,
+    count: offer.ids.length,
+    picked: offer.ids,
+    fullMinor,
+    payMinor,
+    offMinor,
+    pct: fullMinor > 0 ? Math.round(offMinor / fullMinor * 100) : 0,
+    valid: true,
+    noSaving: payMinor >= fullMinor
+  };
+}
+
+// src/use-bundle-offer.ts
+import { useCallback as useCallback4, useEffect as useEffect6, useMemo, useRef as useRef2, useState as useState6 } from "react";
+function useBundleOffer(url) {
+  const [state, setState] = useState6({ status: "loading" });
+  const [sel, setSelState] = useState6([]);
+  const requestIdRef = useRef2(0);
+  useEffect6(() => {
+    let cancelled = false;
+    const requestId = ++requestIdRef.current;
+    setState({ status: "loading" });
+    setSelState([]);
+    fetch(url).then((res) => {
+      if (!res.ok) throw new Error(`Bundle offer fetch failed: ${res.status}`);
+      return res.json();
+    }).then((json) => {
+      if (cancelled || requestIdRef.current !== requestId) return;
+      setState({ ...json, status: json.status });
+    }).catch((err) => {
+      if (cancelled || requestIdRef.current !== requestId) return;
+      setState({ status: "error", error: err instanceof Error ? err : new Error(String(err)) });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+  const coursesById = useMemo(() => {
+    if (state.status !== "live" && state.status !== "draft" && state.status !== "gone") return {};
+    const map = {};
+    for (const c of state.courses) map[c.id] = c;
+    return map;
+  }, [state]);
+  const offer = state.status === "live" || state.status === "draft" || state.status === "gone" ? state.offer : null;
+  const alts = state.status === "live" || state.status === "draft" || state.status === "gone" ? state.alts : [];
+  const owned = state.status === "live" || state.status === "draft" || state.status === "gone" ? state.owned : [];
+  const currency = state.status === "live" || state.status === "draft" || state.status === "gone" ? state.currency : null;
+  const isRuleOffer = offer !== null && offer.kind === "rule";
+  const ruleOffer = isRuleOffer ? offer : null;
+  const setSel = useCallback4(
+    (nextSel) => {
+      if (!ruleOffer) return;
+      const capped = nextSel.length > ruleOffer.max ? [...owned.filter((id) => nextSel.includes(id)), ...nextSel.filter((id) => !owned.includes(id))].slice(
+        0,
+        ruleOffer.max
+      ) : nextSel;
+      setSelState(capped);
+    },
+    [ruleOffer, owned]
+  );
+  const toggle = useCallback4(
+    (id) => {
+      if (!ruleOffer) return;
+      if (owned.includes(id)) return;
+      setSelState((prev) => {
+        if (prev.includes(id)) return prev.filter((x) => x !== id);
+        const own = owned.filter((o) => ruleOffer.eligible.includes(o));
+        const atMax = prev.length + own.length >= ruleOffer.max;
+        if (atMax) return prev;
+        return [...prev, id];
+      });
+    },
+    [ruleOffer, owned]
+  );
+  const computedQuote = ruleOffer ? quote(ruleOffer, alts, sel, owned, coursesById) : null;
+  const computedNext = ruleOffer && computedQuote ? next(ruleOffer, alts, computedQuote, sel, owned, coursesById) : null;
+  return {
+    status: state.status,
+    currency,
+    offer,
+    courses: coursesById,
+    alts,
+    owned,
+    sel,
+    setSel,
+    toggle,
+    quote: computedQuote,
+    next: computedNext,
+    loading: state.status === "loading",
+    error: state.status === "error" ? state.error : null
+  };
+}
 export {
   CartProvider,
+  fixedQuote,
+  next,
+  quote,
+  quoteOne,
+  toComposedBundleCheckoutFragment,
+  useBundleOffer,
   useCart,
   useCartBundlePrice,
   useCartPrerequisites,
