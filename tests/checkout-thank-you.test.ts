@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { getOrderForThankYou, POLL_INTERVAL_MS, POLL_MAX_REQUESTS } from '../src/checkout';
 import { readOwnershipToken } from '../src/checkout/storage';
-import { ORDER_ID, orderFull, orderThin } from '../src/checkout/__fixtures__/contract-v2';
+import { ORDER_ID, OWNERSHIP_TOKEN, orderFull, orderThin } from '../src/checkout/__fixtures__/contract-v2';
 
 const BASE = 'https://api.test';
 const opts = { domain: 'shop.test', apiBaseUrl: BASE };
@@ -11,7 +11,7 @@ const status = (s: number) => ({ ok: false, status: s, json: async () => ({}) })
 beforeEach(() => {
   vi.useFakeTimers();
   sessionStorage.clear();
-  sessionStorage.setItem(`upgradeshop.checkout.ownership.${ORDER_ID}`, 'own.tok.en');
+  sessionStorage.setItem(`upgradeshop.checkout.ownership.${ORDER_ID}`, OWNERSHIP_TOKEN);
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -22,7 +22,7 @@ describe('getOrderForThankYou', () => {
     const r = await getOrderForThankYou(ORDER_ID, opts);
     expect(f.mock.calls[0][0]).toBe(`${BASE}/api/public/orders/${ORDER_ID}?domain=shop.test`);
     expect(f.mock.calls[0][0]).not.toContain('t=');
-    expect(f.mock.calls[0][1].headers).toEqual({ Authorization: 'Bearer own.tok.en' });
+    expect(f.mock.calls[0][1].headers).toEqual({ Authorization: `Bearer ${OWNERSHIP_TOKEN}` });
     expect(r).toMatchObject({ state: 'paid', full: true, requests: 1 });
   });
 
@@ -61,12 +61,12 @@ describe('getOrderForThankYou', () => {
     const p = getOrderForThankYou(ORDER_ID, { ...opts, onUpdate });
     await vi.advanceTimersByTimeAsync(0);
     expect(f).toHaveBeenCalledTimes(1);
-    expect(readOwnershipToken(ORDER_ID)).toBe('own.tok.en');
+    expect(readOwnershipToken(ORDER_ID)).toBe(OWNERSHIP_TOKEN);
     await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS - 1);
     expect(f).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(f).toHaveBeenCalledTimes(2);
-    expect(readOwnershipToken(ORDER_ID)).toBe('own.tok.en');
+    expect(readOwnershipToken(ORDER_ID)).toBe(OWNERSHIP_TOKEN);
     await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
     const r = await p;
     expect(f).toHaveBeenCalledTimes(3);
@@ -84,7 +84,7 @@ describe('getOrderForThankYou', () => {
     expect(POLL_MAX_REQUESTS).toBe(12);
     expect(f).toHaveBeenCalledTimes(12);
     expect(r).toMatchObject({ state: 'not_received', requests: 12 });
-    expect(readOwnershipToken(ORDER_ID)).toBe('own.tok.en');
+    expect(readOwnershipToken(ORDER_ID)).toBe(OWNERSHIP_TOKEN);
   });
 
   it('a 429 is non-terminal: polling ends in not_received, token kept, no onPaid', async () => {
@@ -96,7 +96,7 @@ describe('getOrderForThankYou', () => {
     const r = await p;
     expect(f).toHaveBeenCalledTimes(2);
     expect(r.state).toBe('not_received');
-    expect(readOwnershipToken(ORDER_ID)).toBe('own.tok.en');
+    expect(readOwnershipToken(ORDER_ID)).toBe(OWNERSHIP_TOKEN);
     expect(onPaid).not.toHaveBeenCalled();
   });
 
@@ -154,7 +154,7 @@ describe('getOrderForThankYou', () => {
     release(ok(orderFull('paid')));
     const r = await p;
     expect(onPaid).not.toHaveBeenCalled();
-    expect(readOwnershipToken(ORDER_ID)).toBe('own.tok.en');
+    expect(readOwnershipToken(ORDER_ID)).toBe(OWNERSHIP_TOKEN);
     expect(r.state).toBe('not_received');
   });
 
@@ -167,7 +167,7 @@ describe('getOrderForThankYou', () => {
     }));
     const r = await getOrderForThankYou(ORDER_ID, { ...opts, onPaid, signal: ctl.signal });
     expect(onPaid).not.toHaveBeenCalled();
-    expect(readOwnershipToken(ORDER_ID)).toBe('own.tok.en');
+    expect(readOwnershipToken(ORDER_ID)).toBe(OWNERSHIP_TOKEN);
     expect(r.state).toBe('not_received');
   });
 

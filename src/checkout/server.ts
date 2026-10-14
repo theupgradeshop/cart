@@ -1,6 +1,6 @@
 // Server-safe entry (`@upgradeshop/cart/checkout/server`): no 'use client', no React, no browser APIs.
 // A Server Component (the product page) can call getCheckoutCapabilities from here.
-export { getCheckoutCapabilities } from './capabilities';
+export { getCheckoutCapabilities, maxInstallmentsFor } from './capabilities';
 export { buildCartDoorBody, buildFunnelDoorBody } from './bodies';
 export { CheckoutError, checkoutErrorKey, isCheckoutError, CHECKOUT_ERROR_KEYS } from './errors';
 export type {
@@ -15,6 +15,7 @@ export type {
   StartCheckoutInput,
   StartCheckoutResult,
   CheckoutCapabilities,
+  InstallmentRule,
   OrderItemThin,
   OrderThin,
   OrderFull,

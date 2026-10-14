@@ -16,6 +16,7 @@ export type { UseLinkCouponOptions, LinkCouponLine } from './use-link-coupon';
 // can never pull a 'use client' function into a Server Component.
 export { CheckoutError, checkoutErrorKey, isCheckoutError, CHECKOUT_ERROR_KEYS } from './errors';
 export { buildCartDoorBody, buildFunnelDoorBody } from './bodies';
+export { maxInstallmentsFor } from './capabilities';
 export type {
   CheckoutTotals,
   CheckoutNext,
@@ -28,6 +29,7 @@ export type {
   StartCheckoutInput,
   StartCheckoutResult,
   CheckoutCapabilities,
+  InstallmentRule,
   OrderItemThin,
   OrderThin,
   OrderFull,

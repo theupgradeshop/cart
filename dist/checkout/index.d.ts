@@ -30,6 +30,8 @@ interface CheckoutV2Response {
 }
 /** Stable keys the site maps to its own words. The package never renders them. */
 type CheckoutErrorKey = 'generic' | 'invalid_request' | 'order_not_found' | 'module_disabled' | 'gateway_not_configured' | 'unsupported_provider' | 'prerequisite_missing' | 'cohort_unavailable' | 'cohort_dates_unavailable' | 'cohort_identity_registered' | 'coupon_limit_reached' | 'coupon_invalid' | 'product_unavailable' | 'subscription_unavailable' | 'invalid_return_url' | 'payment_unavailable' | 'upsell_unavailable' | 'installments_unavailable'
+/** A physical order without a usable shipping address (dashboard follow-up, not yet emitted). */
+ | 'shipping_address_required'
 /** HTTP 429 from the door. */
  | 'rate_limited'
 /** The request never got an answer (offline, DNS, CORS). */
@@ -95,9 +97,16 @@ interface StartCheckoutResult {
     next: CheckoutNext;
     funnelNextUrl?: string | null;
 }
+/** One installment rule: from `minAmount` (inclusive, order total) up to `maxPayments` payments. */
+interface InstallmentRule {
+    minAmount: number;
+    maxPayments: number;
+}
 interface CheckoutCapabilities {
     available: boolean;
     installmentsMax: number;
+    /** Amount-based limits; getCheckoutCapabilities always returns it ([] when the store has none). Use `maxInstallmentsFor(total, capabilities)`. */
+    installmentRules?: InstallmentRule[];
 }
 /** GET /api/public/orders/[orderId], the thin shape (no valid ownership token). */
 interface OrderItemThin {
@@ -313,4 +322,16 @@ declare function buildFunnelDoorBody(input: StartFunnelCheckoutInput): {
     cancelUrl: string;
 };
 
-export { CHECKOUT_ERROR_KEYS, type CartDoorItem, type CheckoutCapabilities, type CheckoutCustomer, CheckoutError, type CheckoutErrorKey, type CheckoutNext, type CheckoutTotals, type CheckoutV2Response, type GetOrderForThankYouOptions, type LinkCouponLine, type OrderFull, type OrderItemThin, type OrderThin, POLL_INTERVAL_MS, POLL_MAX_REQUESTS, type StartCartCheckoutInput, type StartCheckoutInput, type StartCheckoutResult, type StartFunnelCheckoutInput, TERMINAL_FINANCIAL_STATUSES, type ThankYouResult, type ThankYouState, type UseLinkCouponOptions, type UseThankYouOrderOptions, type UseThankYouOrderResult, buildCartDoorBody, buildFunnelDoorBody, checkoutErrorKey, getOrderForThankYou, isCheckoutError, startCheckout, useLinkCoupon, useThankYouOrder };
+/**
+ * The most payments a visitor may choose, mirroring the dashboard's own resolution at the gateway level.
+ * `total` is the post-coupon, post-shipping order total in major units; it is rounded (Math.round) as the
+ * checkout door does. No rules: `installmentsMax`. With rules: the rule with the HIGHEST `minAmount` that the
+ * total reaches decides (ties keep the original array order, first wins), with NO cap by `installmentsMax`;
+ * no rule reached, or a total that is not finite, gives 1. Per-product limits are not known to the site, so it never offers more than this
+ * gateway-level number. Pure and server-safe.
+ */
+declare function maxInstallmentsFor(total: number, capabilities: Pick<CheckoutCapabilities, 'installmentsMax'> & {
+    installmentRules?: InstallmentRule[];
+}): number;
+
+export { CHECKOUT_ERROR_KEYS, type CartDoorItem, type CheckoutCapabilities, type CheckoutCustomer, CheckoutError, type CheckoutErrorKey, type CheckoutNext, type CheckoutTotals, type CheckoutV2Response, type GetOrderForThankYouOptions, type InstallmentRule, type LinkCouponLine, type OrderFull, type OrderItemThin, type OrderThin, POLL_INTERVAL_MS, POLL_MAX_REQUESTS, type StartCartCheckoutInput, type StartCheckoutInput, type StartCheckoutResult, type StartFunnelCheckoutInput, TERMINAL_FINANCIAL_STATUSES, type ThankYouResult, type ThankYouState, type UseLinkCouponOptions, type UseThankYouOrderOptions, type UseThankYouOrderResult, buildCartDoorBody, buildFunnelDoorBody, checkoutErrorKey, getOrderForThankYou, isCheckoutError, maxInstallmentsFor, startCheckout, useLinkCoupon, useThankYouOrder };

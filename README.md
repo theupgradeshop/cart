@@ -343,9 +343,14 @@ Two entries, because a function exported from a `'use client'` module cannot be 
 Server Component:
 
 - `@upgradeshop/cart/checkout/server` (no directive, no React): `getCheckoutCapabilities(domain, apiBaseUrl)`
-  -> `{ available, installmentsMax }` (call it in the product page to decide Buy server-side, no cart JS),
+  -> `{ available, installmentsMax, installmentRules }` (invalid rules are dropped, absent -> `[]`; call it in the product page to decide Buy server-side, no cart JS),
+  `maxInstallmentsFor(total, capabilities)` (pure; `total` is the post-coupon, post-shipping order total in
+  major units, rounded like the checkout door; no rules -> `installmentsMax`; with rules -> the rule with the
+  HIGHEST `minAmount` the total reaches decides (ties: first in array order), with no cap by `installmentsMax`,
+  and no rule reached -> 1; per-product limits are not known to the site, so it never offers more than this
+  gateway-level number; also re-exported from `./checkout`, and a total that is not finite gives 1; it trusts its input),
   `buildCartDoorBody`, `buildFunnelDoorBody`, `CheckoutError`, `isCheckoutError`, `checkoutErrorKey`,
-  `CHECKOUT_ERROR_KEYS`, and the types.
+  `CHECKOUT_ERROR_KEYS` (includes `shipping_address_required`, a dashboard follow-up not yet emitted), and the types.
   A request slower than `timeoutMs` (default 5000) reads as not available.
 - `@upgradeshop/cart/checkout` (`'use client'`): `startCheckout`, `getOrderForThankYou`,
   `useThankYouOrder`, `useLinkCoupon`, and re-exports of the errors, body builders and types (NOT

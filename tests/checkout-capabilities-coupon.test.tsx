@@ -13,11 +13,11 @@ describe('getCheckoutCapabilities', () => {
   it('reads payments{available, installmentsMax}', async () => {
     const f = settings({ payments: { available: true, installmentsMax: 6 }, maxPayments: 1 });
     vi.stubGlobal('fetch', f);
-    expect(await getCheckoutCapabilities('shop.test', 'https://api.test')).toEqual({ available: true, installmentsMax: 6 });
+    expect(await getCheckoutCapabilities('shop.test', 'https://api.test')).toEqual({ available: true, installmentsMax: 6, installmentRules: [] });
     expect(f.mock.calls[0][0]).toBe('https://api.test/api/public/checkout-settings?domain=shop.test');
   });
   it('not available, missing payments, failures: hidden', async () => {
-    const none = { available: false, installmentsMax: 1 };
+    const none = { available: false, installmentsMax: 1, installmentRules: [] };
     vi.stubGlobal('fetch', settings({ payments: { available: false, installmentsMax: 3 } }));
     expect(await getCheckoutCapabilities('d', 'https://api.test')).toEqual(none);
     vi.stubGlobal('fetch', settings({ maxPayments: 3 }));
@@ -35,7 +35,7 @@ describe('getCheckoutCapabilities', () => {
       })));
       const p = getCheckoutCapabilities('d', 'https://api.test', 1000);
       await vi.advanceTimersByTimeAsync(1001);
-      expect(await p).toEqual({ available: false, installmentsMax: 1 });
+      expect(await p).toEqual({ available: false, installmentsMax: 1, installmentRules: [] });
       const q = getCheckoutCapabilities('d', 'https://api.test');
       await vi.advanceTimersByTimeAsync(4999);
       let settled = false;
@@ -43,7 +43,7 @@ describe('getCheckoutCapabilities', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(settled).toBe(false);
       await vi.advanceTimersByTimeAsync(2);
-      expect(await q).toEqual({ available: false, installmentsMax: 1 });
+      expect(await q).toEqual({ available: false, installmentsMax: 1, installmentRules: [] });
     } finally {
       vi.useRealTimers();
     }
@@ -148,7 +148,90 @@ describe('server entry', () => {
   it('exports the server-safe parts and works without React', async () => {
     const m = await import('../src/checkout/server');
     expect(Object.keys(m).sort()).toEqual(
-      ['CHECKOUT_ERROR_KEYS', 'CheckoutError', 'buildCartDoorBody', 'buildFunnelDoorBody', 'checkoutErrorKey', 'getCheckoutCapabilities', 'isCheckoutError'],
+      ['CHECKOUT_ERROR_KEYS', 'CheckoutError', 'buildCartDoorBody', 'buildFunnelDoorBody', 'checkoutErrorKey', 'getCheckoutCapabilities', 'isCheckoutError', 'maxInstallmentsFor'],
     );
+  });
+});
+
+import { maxInstallmentsFor } from '../src/checkout/server';
+import * as serverEntry from '../src/checkout/server';
+import {
+  settingsPayable, settingsNotAvailable, settingsPayableAlt,
+} from '../src/checkout/__fixtures__/recorded-u1';
+
+describe('capabilities from recorded checkout-settings answers', () => {
+  const settings = (body: unknown) => vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => body });
+  it.each([
+    ['payable', settingsPayable, { available: true, installmentsMax: 1, installmentRules: [] }],
+    ['not available', settingsNotAvailable, { available: false, installmentsMax: 1, installmentRules: [] }],
+    ['payable (second store)', settingsPayableAlt, { available: true, installmentsMax: 1, installmentRules: [] }],
+  ])('%s', async (_n, rec, expected) => {
+    vi.stubGlobal('fetch', settings(rec));
+    expect(await getCheckoutCapabilities('d', 'https://api.test')).toEqual(expected);
+  });
+
+  it('installmentRules: valid kept, invalid dropped, absent -> []', async () => {
+    vi.stubGlobal('fetch', settings({ payments: { available: true, installmentsMax: 12, installmentRules: [
+      { minAmount: 100, maxPayments: 3 }, { minAmount: -1, maxPayments: 3 }, { minAmount: 'x', maxPayments: 3 },
+      { minAmount: Infinity, maxPayments: 3 }, { minAmount: 50, maxPayments: 0 }, { minAmount: 50, maxPayments: 2.5 },
+      null, 'r', { minAmount: 0, maxPayments: 1 },
+    ] } }));
+    expect((await getCheckoutCapabilities('d', 'https://api.test')).installmentRules).toEqual([
+      { minAmount: 100, maxPayments: 3 }, { minAmount: 0, maxPayments: 1 },
+    ]);
+    vi.stubGlobal('fetch', settings({ payments: { available: true, installmentsMax: 2, installmentRules: 'nope' } }));
+    expect((await getCheckoutCapabilities('d', 'https://api.test')).installmentRules).toEqual([]);
+  });
+});
+
+describe('maxInstallmentsFor', () => {
+  const rules = [{ minAmount: 100, maxPayments: 3 }, { minAmount: 500, maxPayments: 6 }, { minAmount: 1000, maxPayments: 12 }];
+  it('no rules: installmentsMax (recorded settings have no rules)', () => {
+    expect(maxInstallmentsFor(85, settingsPayable.payments)).toBe(1);
+    expect(maxInstallmentsFor(85, { installmentsMax: 6, installmentRules: [] })).toBe(6);
+  });
+  // The recorded settings carry no rules, so every rule test below is typed (mirrors the dashboard's resolveAllowedInstallments).
+  it('typed: the rule with the highest minAmount reached decides', () => {
+    const c = { installmentsMax: 12, installmentRules: rules };
+    expect(maxInstallmentsFor(100, c)).toBe(3);
+    expect(maxInstallmentsFor(499.4, c)).toBe(3);
+    expect(maxInstallmentsFor(500, c)).toBe(6);
+    expect(maxInstallmentsFor(5000, c)).toBe(12);
+  });
+  it('typed: below every minAmount gives 1', () => {
+    expect(maxInstallmentsFor(99.4, { installmentsMax: 12, installmentRules: rules })).toBe(1);
+  });
+  it('typed: no cap by installmentsMax when rules exist', () => {
+    expect(maxInstallmentsFor(5000, { installmentsMax: 4, installmentRules: rules })).toBe(12);
+    expect(maxInstallmentsFor(1000, { installmentsMax: 1, installmentRules: [{ minAmount: 1000, maxPayments: 3 }] })).toBe(3);
+  });
+  it('typed: non-monotone rules, the highest reached minAmount wins even if it allows fewer', () => {
+    expect(maxInstallmentsFor(600, { installmentsMax: 1, installmentRules: [{ minAmount: 0, maxPayments: 12 }, { minAmount: 500, maxPayments: 6 }] })).toBe(6);
+    expect(maxInstallmentsFor(1200, { installmentsMax: 1, installmentRules: [{ minAmount: 100, maxPayments: 12 }, { minAmount: 1000, maxPayments: 3 }] })).toBe(3);
+  });
+  it('typed: duplicate minAmount keeps array order, first wins', () => {
+    expect(maxInstallmentsFor(500, { installmentsMax: 1, installmentRules: [{ minAmount: 500, maxPayments: 3 }, { minAmount: 500, maxPayments: 6 }] })).toBe(3);
+  });
+  it('typed: the total is rounded like the door (499.5 reaches a 500 rule)', () => {
+    const c = { installmentsMax: 1, installmentRules: [{ minAmount: 500, maxPayments: 6 }] };
+    expect(maxInstallmentsFor(499.5, c)).toBe(6);
+    expect(maxInstallmentsFor(499.49, c)).toBe(1);
+  });
+  it('typed: a total that is not finite reaches no rule (1)', () => {
+    const c = { installmentsMax: 12, installmentRules: [{ minAmount: 0, maxPayments: 6 }] };
+    expect(maxInstallmentsFor(NaN, c)).toBe(1);
+    expect(maxInstallmentsFor(Infinity, c)).toBe(1);
+    expect(maxInstallmentsFor(NaN, { installmentsMax: 5, installmentRules: [] })).toBe(5);
+  });
+  it('typed: a non-finite installmentsMax reads as 1', () => {
+    expect(maxInstallmentsFor(10, { installmentsMax: Infinity, installmentRules: [] })).toBe(1);
+    expect(maxInstallmentsFor(10, { installmentsMax: NaN })).toBe(1);
+  });
+  it('installmentRules may be absent', () => {
+    expect(maxInstallmentsFor(10, { installmentsMax: 5 })).toBe(5);
+  });
+  it('is exported from both entries', () => {
+    expect(serverEntry.maxInstallmentsFor).toBe(maxInstallmentsFor);
+    expect(typeof clientEntry.maxInstallmentsFor).toBe('function');
   });
 });

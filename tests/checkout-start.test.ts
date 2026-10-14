@@ -7,7 +7,11 @@ import {
   type StartCheckoutInput,
 } from '../src/checkout';
 import { readOwnershipToken } from '../src/checkout/storage';
-import { ORDER_ID, payResponse, noneResponse, funnelPayResponse, errorBodies } from '../src/checkout/__fixtures__/contract-v2';
+import {
+  payRedirectGatewayA, payRedirectGatewayARequest, payRedirectGatewayB, payRedirectGatewayBRequest,
+  freeResponse, funnelPayRecorded, funnelPayRecordedRequest, errorProductUnavailable,
+} from '../src/checkout/__fixtures__/recorded-u1';
+import { ORDER_ID, OWNERSHIP_TOKEN, payResponse, noneResponse, funnelPayResponse, errorBodies } from '../src/checkout/__fixtures__/contract-v2';
 
 const BASE = 'https://api.test';
 
@@ -37,20 +41,20 @@ describe('startCheckout', () => {
     vi.stubGlobal('fetch', f);
     const input = cartInput();
     const r = await startCheckout(input);
-    expect(readOwnershipToken(ORDER_ID)).toBe('own.tok.en');
+    expect(readOwnershipToken(ORDER_ID)).toBe(OWNERSHIP_TOKEN);
     expect((input as { navigate: ReturnType<typeof vi.fn> }).navigate).toHaveBeenCalledWith(
       (payResponse.next as { url: string }).url,
     );
-    expect(r).toEqual({ orderId: ORDER_ID, orderNumber: 'O-10001', totals: payResponse.totals, next: payResponse.next });
-    expect(JSON.stringify(r)).not.toContain('own.tok.en');
+    expect(r).toEqual({ orderId: ORDER_ID, orderNumber: payResponse.orderNumber, totals: payResponse.totals, next: payResponse.next });
+    expect(JSON.stringify(r)).not.toContain(OWNERSHIP_TOKEN);
   });
 
   it('none: goes to the site thank-you route with the order id', async () => {
     vi.stubGlobal('fetch', reply(200, noneResponse));
     const input = cartInput();
     await startCheckout(input);
-    expect((input as { navigate: ReturnType<typeof vi.fn> }).navigate).toHaveBeenCalledWith(`/thank-you?orderId=${ORDER_ID}`);
-    expect(readOwnershipToken(ORDER_ID)).toBe('own.tok.en');
+    expect((input as { navigate: ReturnType<typeof vi.fn> }).navigate).toHaveBeenCalledWith(`/thank-you?orderId=${noneResponse.orderId}`);
+    expect(readOwnershipToken(noneResponse.orderId)).toBe(OWNERSHIP_TOKEN);
   });
 
   it('cart door request: contract 2, endpoint, body keys, no installments by default', async () => {
@@ -87,7 +91,7 @@ describe('startCheckout', () => {
   );
 
   it('funnels door request: stepId body, endpoint, returns funnelNextUrl', async () => {
-    const f = reply(200, funnelPayResponse);
+    const f = reply(200, { ...funnelPayResponse, funnelNextUrl: '/f/next-step' }) /* recorded answer with one field set */;
     vi.stubGlobal('fetch', f);
     const r = await startCheckout({
       door: 'funnel',
@@ -178,7 +182,7 @@ describe('startCheckout', () => {
       const r = await startCheckout(input);
       expect(r.funnelNextUrl).toBeNull();
       expect((input as { navigate: ReturnType<typeof vi.fn> }).navigate).toHaveBeenCalledTimes(1);
-      expect(readOwnershipToken(ORDER_ID)).toBe('own.tok.en');
+      expect(readOwnershipToken(ORDER_ID)).toBe(OWNERSHIP_TOKEN);
     });
 
     it('server extras do not pass through; next and totals are rebuilt', async () => {
@@ -189,7 +193,7 @@ describe('startCheckout', () => {
         next: { kind: 'pay', url: (payResponse.next as { url: string }).url, display: 'modal' },
       }));
       const r = await startCheckout(cartInput());
-      expect(r).toEqual({ orderId: ORDER_ID, orderNumber: 'O-10001', totals: payResponse.totals, next: payResponse.next });
+      expect(r).toEqual({ orderId: ORDER_ID, orderNumber: payResponse.orderNumber, totals: payResponse.totals, next: payResponse.next });
       vi.stubGlobal('fetch', reply(200, { ...noneResponse, next: { kind: 'none', url: 'https://x.test' } }));
       expect((await startCheckout(cartInput())).next).toEqual({ kind: 'none' });
     });
@@ -207,10 +211,10 @@ describe('startCheckout', () => {
     vi.stubGlobal('fetch', reply(200, noneResponse));
     const a = cartInput({ thankYouPath: '/thank-you#top' });
     await startCheckout(a);
-    expect((a as { navigate: ReturnType<typeof vi.fn> }).navigate).toHaveBeenCalledWith(`/thank-you?orderId=${ORDER_ID}#top`);
+    expect((a as { navigate: ReturnType<typeof vi.fn> }).navigate).toHaveBeenCalledWith(`/thank-you?orderId=${noneResponse.orderId}#top`);
     const b = cartInput({ thankYouPath: '/thank-you?x=1#top' });
     await startCheckout(b);
-    expect((b as { navigate: ReturnType<typeof vi.fn> }).navigate).toHaveBeenCalledWith(`/thank-you?x=1&orderId=${ORDER_ID}#top`);
+    expect((b as { navigate: ReturnType<typeof vi.fn> }).navigate).toHaveBeenCalledWith(`/thank-you?x=1&orderId=${noneResponse.orderId}#top`);
   });
 
   it('a 200 that is not a v2 body is generic and stores nothing', async () => {
@@ -243,5 +247,85 @@ describe('startCheckout', () => {
     for (const k of ['coupon_invalid', 'product_unavailable','subscription_unavailable', 'invalid_return_url', 'payment_unavailable', 'upsell_unavailable', 'installments_unavailable', 'coupon_limit_reached']) {
       expect(CHECKOUT_ERROR_KEYS).toContain(k);
     }
+  });
+});
+
+
+describe('against recordings of the real dashboard (customer-websites-6f52 U1)', () => {
+  const cartFromRecording = (rec: typeof payRedirectGatewayARequest) =>
+    cartInput({
+      domain: rec.domain,
+      customer: rec.customer,
+      items: rec.items,
+      language: rec.language,
+      successUrl: rec.successUrl,
+      cancelUrl: rec.cancelUrl,
+    });
+
+  it.each([
+    ['pay A', payRedirectGatewayA, payRedirectGatewayARequest],
+    ['pay B', payRedirectGatewayB, payRedirectGatewayBRequest],
+  ])('%s: our request body equals the recorded one; the recorded answer parses, stores the token, navigates to the pay url', async (_n, res, rec) => {
+    const f = reply(200, res);
+    vi.stubGlobal('fetch', f);
+    const input = cartFromRecording(rec);
+    const r = await startCheckout(input);
+    expect(JSON.parse(f.mock.calls[0][1].body)).toEqual(rec);
+    expect(r).toEqual({ orderId: res.orderId, orderNumber: res.orderNumber, totals: res.totals, next: res.next });
+    expect(readOwnershipToken(res.orderId)).toBe(res.ownershipToken);
+    expect((input as { navigate: ReturnType<typeof vi.fn> }).navigate).toHaveBeenCalledWith((res.next as { url: string }).url);
+  });
+
+  it('free: recorded answer goes to the thank-you route', async () => {
+    vi.stubGlobal('fetch', reply(200, freeResponse));
+    const input = cartInput();
+    const r = await startCheckout(input);
+    expect(r.next).toEqual({ kind: 'none' });
+    expect(r.totals.total).toBe(0);
+    expect((input as { navigate: ReturnType<typeof vi.fn> }).navigate).toHaveBeenCalledWith(`/thank-you?orderId=${freeResponse.orderId}`);
+  });
+
+  it('funnels door: our request body equals the recorded one; recorded answer (funnelNextUrl null) parses', async () => {
+    const f = reply(200, funnelPayRecorded);
+    vi.stubGlobal('fetch', f);
+    const rec = funnelPayRecordedRequest;
+    const input: StartCheckoutInput = {
+      door: 'funnel',
+      domain: 'shop.test',
+      apiBaseUrl: BASE,
+      stepId: rec.stepId,
+      email: rec.email,
+      name: rec.name,
+      phone: rec.phone,
+      successUrl: rec.successUrl,
+      cancelUrl: rec.cancelUrl,
+      thankYouPath: '/thank-you',
+      navigate: vi.fn(),
+    };
+    const r = await startCheckout(input);
+    expect(JSON.parse(f.mock.calls[0][1].body)).toEqual(rec);
+    expect(r.funnelNextUrl).toBeNull();
+    expect(r.next).toEqual(funnelPayRecorded.next);
+  });
+
+  it('recorded product_unavailable carries the failing slug as items', async () => {
+    vi.stubGlobal('fetch', reply(errorProductUnavailable.status, errorProductUnavailable.body));
+    const e = await startCheckout(cartInput()).catch((x) => x);
+    expect(e.key).toBe('product_unavailable');
+    expect(e.items).toEqual(errorProductUnavailable.body.items);
+  });
+
+  it('the server error text is never carried (keys only)', async () => {
+    const withText = errorBodies.filter((e) => e.recorded);
+    for (const e of withText) {
+      vi.stubGlobal('fetch', reply(e.status, e.body));
+      const err = await startCheckout(cartInput()).catch((x) => x);
+      expect(err.message).toBe(e.key);
+      expect(JSON.stringify(err)).not.toContain(e.body.error);
+    }
+  });
+
+  it('shipping_address_required is a known key', () => {
+    expect(CHECKOUT_ERROR_KEYS).toContain('shipping_address_required');
   });
 });

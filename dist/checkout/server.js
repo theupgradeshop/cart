@@ -26,13 +26,26 @@ __export(server_exports, {
   buildFunnelDoorBody: () => buildFunnelDoorBody,
   checkoutErrorKey: () => checkoutErrorKey,
   getCheckoutCapabilities: () => getCheckoutCapabilities,
-  isCheckoutError: () => isCheckoutError
+  isCheckoutError: () => isCheckoutError,
+  maxInstallmentsFor: () => maxInstallmentsFor
 });
 module.exports = __toCommonJS(server_exports);
 
 // src/checkout/capabilities.ts
+function parseRules(x) {
+  if (!Array.isArray(x)) return [];
+  const out = [];
+  for (const r of x) {
+    if (!r || typeof r !== "object") continue;
+    const { minAmount, maxPayments } = r;
+    if (typeof minAmount === "number" && Number.isFinite(minAmount) && minAmount >= 0 && typeof maxPayments === "number" && Number.isInteger(maxPayments) && maxPayments >= 1) {
+      out.push({ minAmount, maxPayments });
+    }
+  }
+  return out;
+}
 async function getCheckoutCapabilities(domain, apiBaseUrl, timeoutMs = 5e3) {
-  const none = { available: false, installmentsMax: 1 };
+  const none = { available: false, installmentsMax: 1, installmentRules: [] };
   try {
     const res = await fetch(
       `${apiBaseUrl.replace(/\/+$/, "")}/api/public/checkout-settings?domain=${encodeURIComponent(domain)}`,
@@ -43,10 +56,19 @@ async function getCheckoutCapabilities(domain, apiBaseUrl, timeoutMs = 5e3) {
     const p = json?.payments;
     if (!p || p.available !== true) return none;
     const max = typeof p.installmentsMax === "number" && Number.isFinite(p.installmentsMax) ? Math.floor(p.installmentsMax) : 1;
-    return { available: true, installmentsMax: Math.max(1, max) };
+    return { available: true, installmentsMax: Math.max(1, max), installmentRules: parseRules(p.installmentRules) };
   } catch {
     return none;
   }
+}
+function maxInstallmentsFor(total, capabilities) {
+  const base = Number.isFinite(capabilities.installmentsMax) ? Math.max(1, Math.floor(capabilities.installmentsMax)) : 1;
+  const rules = capabilities.installmentRules ?? [];
+  if (rules.length === 0) return base;
+  if (!Number.isFinite(total)) return 1;
+  const t = Math.round(Math.max(0, total));
+  const match = [...rules].sort((a, b) => b.minAmount - a.minAmount).find((r) => t >= r.minAmount);
+  return match ? match.maxPayments : 1;
 }
 
 // src/checkout/bodies.ts
@@ -107,7 +129,8 @@ var KNOWN = /* @__PURE__ */ new Set([
   "invalid_return_url",
   "payment_unavailable",
   "upsell_unavailable",
-  "installments_unavailable"
+  "installments_unavailable",
+  "shipping_address_required"
 ]);
 var CHECKOUT_ERROR_KEYS = [...KNOWN, "rate_limited", "network"];
 var BRAND = /* @__PURE__ */ Symbol.for("upgradeshop.checkout.error");
@@ -138,5 +161,6 @@ function checkoutErrorKey(status, code) {
   buildFunnelDoorBody,
   checkoutErrorKey,
   getCheckoutCapabilities,
-  isCheckoutError
+  isCheckoutError,
+  maxInstallmentsFor
 });

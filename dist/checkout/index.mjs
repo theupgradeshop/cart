@@ -58,7 +58,8 @@ var KNOWN = /* @__PURE__ */ new Set([
   "invalid_return_url",
   "payment_unavailable",
   "upsell_unavailable",
-  "installments_unavailable"
+  "installments_unavailable",
+  "shipping_address_required"
 ]);
 var CHECKOUT_ERROR_KEYS = [...KNOWN, "rate_limited", "network"];
 var BRAND = /* @__PURE__ */ Symbol.for("upgradeshop.checkout.error");
@@ -389,6 +390,17 @@ function useLinkCoupon(o) {
     };
   }, [sig, o.appliedCode, o.hasTypedText, o.collecting]);
 }
+
+// src/checkout/capabilities.ts
+function maxInstallmentsFor(total, capabilities) {
+  const base = Number.isFinite(capabilities.installmentsMax) ? Math.max(1, Math.floor(capabilities.installmentsMax)) : 1;
+  const rules = capabilities.installmentRules ?? [];
+  if (rules.length === 0) return base;
+  if (!Number.isFinite(total)) return 1;
+  const t = Math.round(Math.max(0, total));
+  const match = [...rules].sort((a, b) => b.minAmount - a.minAmount).find((r) => t >= r.minAmount);
+  return match ? match.maxPayments : 1;
+}
 export {
   CHECKOUT_ERROR_KEYS,
   CheckoutError,
@@ -400,6 +412,7 @@ export {
   checkoutErrorKey,
   getOrderForThankYou,
   isCheckoutError,
+  maxInstallmentsFor,
   startCheckout,
   useLinkCoupon,
   useThankYouOrder

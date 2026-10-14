@@ -47,6 +47,8 @@ export type CheckoutErrorKey =
   | 'payment_unavailable'
   | 'upsell_unavailable'
   | 'installments_unavailable'
+  /** A physical order without a usable shipping address (dashboard follow-up, not yet emitted). */
+  | 'shipping_address_required'
   /** HTTP 429 from the door. */
   | 'rate_limited'
   /** The request never got an answer (offline, DNS, CORS). */
@@ -120,9 +122,17 @@ export interface StartCheckoutResult {
   funnelNextUrl?: string | null;
 }
 
+/** One installment rule: from `minAmount` (inclusive, order total) up to `maxPayments` payments. */
+export interface InstallmentRule {
+  minAmount: number;
+  maxPayments: number;
+}
+
 export interface CheckoutCapabilities {
   available: boolean;
   installmentsMax: number;
+  /** Amount-based limits; getCheckoutCapabilities always returns it ([] when the store has none). Use `maxInstallmentsFor(total, capabilities)`. */
+  installmentRules?: InstallmentRule[];
 }
 
 /** GET /api/public/orders/[orderId], the thin shape (no valid ownership token). */

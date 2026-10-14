@@ -19,6 +19,7 @@ const KNOWN: ReadonlySet<string> = new Set<CheckoutErrorKey>([
   'payment_unavailable',
   'upsell_unavailable',
   'installments_unavailable',
+  'shipping_address_required',
 ]);
 
 /** Every key a site must have a sentence for. */
