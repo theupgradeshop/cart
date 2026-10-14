@@ -330,6 +330,49 @@ to `RuleOffer` just to read them) and exposes `presets`, the controlled
 keeps an edited/"mine" one), `undoChanges()` (only meaningful when the
 current selection is "mine"; a no-op otherwise).
 
+## Checkout (`@upgradeshop/cart/checkout`, `@upgradeshop/cart/checkout/server`)
+
+Headless checkout logic for template-built sites (customer-websites-6f52). Behaviour only: no visual
+components, no visitor words (every failure is a stable key the site words itself), no gateway name.
+It talks only to the store/payments public API: `POST /api/public/checkout` and
+`POST /api/public/funnels/checkout` in contract 2, `GET /api/public/checkout-settings`,
+`GET /api/public/orders/[orderId]`. Every site value (`apiBaseUrl`, `domain`, return URLs, the
+thank-you path) is a REQUIRED parameter with no default.
+
+Two entries, because a function exported from a `'use client'` module cannot be called from a
+Server Component:
+
+- `@upgradeshop/cart/checkout/server` (no directive, no React): `getCheckoutCapabilities(domain, apiBaseUrl)`
+  -> `{ available, installmentsMax }` (call it in the product page to decide Buy server-side, no cart JS),
+  `buildCartDoorBody`, `buildFunnelDoorBody`, `CheckoutError`, `isCheckoutError`, `checkoutErrorKey`,
+  `CHECKOUT_ERROR_KEYS`, and the types.
+  A request slower than `timeoutMs` (default 5000) reads as not available.
+- `@upgradeshop/cart/checkout` (`'use client'`): `startCheckout`, `getOrderForThankYou`,
+  `useThankYouOrder`, `useLinkCoupon`, and re-exports of the errors, body builders and types (NOT
+  `getCheckoutCapabilities`). Import errors/types from one entry; capabilities only from `./checkout/server`. Use `isCheckoutError(e)`,
+  not `instanceof`, since each entry bundles its own copy of the class.
+
+```ts
+const r = await startCheckout({ door: 'cart', domain, apiBaseUrl, customer, items,
+  successUrl, cancelUrl, thankYouPath, selectedInstallments });
+// paid: ownership token stored in sessionStorage (by orderId) then location.assign(pay url)
+// free: token stored, goes to `${thankYouPath}?orderId=...`. successUrl and thankYouPath name the same page.
+```
+
+- `selectedInstallments` is sent only when it is an integer above 1.
+- A 200 that is not the closed v2 shape (missing field, negative total, empty currency, non-https pay url)
+  is a `generic` error: no token stored, no navigation. The result is rebuilt from the contract's fields only.
+  An unsafe `funnelNextUrl` does not fail the order: it becomes `null`.
+- Errors: `CheckoutError.key` is one of `CHECKOUT_ERROR_KEYS`; `product_unavailable` also carries `items`
+  (the failing slugs).
+- `getOrderForThankYou(orderId, { domain, apiBaseUrl, onPaid, onUpdate, signal })` sends the stored token as
+  `Authorization: Bearer` (never in a URL), polls every 4 s up to 12 requests while the status is not terminal
+  (`paid`, `failed`, `cancelled`, `refunded`), ends a 429 in `not_received`, clears the token only after a
+  terminal status, and calls `onPaid` only on `paid` (clear the cart and the pending coupon there). An aborted
+  run never clears the token and never calls `onPaid`. Without a stored token it returns the thin response.
+- `useLinkCoupon` follows the template's link-coupon recipe but does NOT clear the pending code after an
+  auto-apply (a cancel-return re-applies it); the site clears it on remove, a manual apply and a paid thank-you.
+
 ## Development
 
 ```bash
