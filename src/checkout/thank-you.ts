@@ -41,6 +41,8 @@ export interface GetOrderForThankYouOptions {
   onPaid?: (order: OrderThin | OrderFull) => void;
   /** Stops polling (component unmount). An aborted run never clears the token, never calls onPaid and never returns a terminal state. */
   signal?: AbortSignal;
+  /** Keep the ownership token after a terminal status (the pay pop-up navigates to the thank-you page, which still needs it). Default false. */
+  keepToken?: boolean;
 }
 
 /** A site callback that throws must never stop the result from returning. */
@@ -105,7 +107,7 @@ export async function getOrderForThankYou(orderId: string, opts: GetOrderForThan
           full = 'customerEmail' in json;
           const state = stateFor(json.financialStatus);
           if (state) {
-            clearOwnershipToken(orderId);
+            if (!opts.keepToken) clearOwnershipToken(orderId);
             if (state === 'paid') safely(() => opts.onPaid?.(json!));
             return { state, order: json, full, requests };
           }

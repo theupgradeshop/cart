@@ -1,3 +1,5 @@
+import { RefObject } from 'react';
+
 /**
  * Types of the headless checkout (`@upgradeshop/cart/checkout`).
  *
@@ -12,11 +14,13 @@ interface CheckoutTotals {
     total: number;
     currency: string;
 }
+/** `display: "redirect"` (optional, only that value): the dashboard asks for a full-page redirect instead of the pay pop-up. */
 type CheckoutNext = {
     kind: 'none';
 } | {
     kind: 'pay';
     url: string;
+    display?: 'redirect';
 };
 /** 200 body of both doors in v2 (closed shape). */
 interface CheckoutV2Response {
@@ -191,6 +195,8 @@ interface GetOrderForThankYouOptions {
     onPaid?: (order: OrderThin | OrderFull) => void;
     /** Stops polling (component unmount). An aborted run never clears the token, never calls onPaid and never returns a terminal state. */
     signal?: AbortSignal;
+    /** Keep the ownership token after a terminal status (the pay pop-up navigates to the thank-you page, which still needs it). Default false. */
+    keepToken?: boolean;
 }
 /**
  * Reads the order for the thank-you page. With a stored ownership token the full shape comes back;
@@ -215,6 +221,61 @@ type UseThankYouOrderResult = {
 } & ThankYouResult);
 /** Drives the thank-you page: `confirming` while polling, then `done` with one of the states. */
 declare function useThankYouOrder(orderId: string | null, opts: UseThankYouOrderOptions): UseThankYouOrderResult;
+
+/** The optional signal the dashboard pay page may post to its parent. Anything else is ignored. */
+interface PayFrameMessage {
+    type: 'tus-payment';
+    status: 'paid' | 'cancelled';
+    orderId: string;
+}
+interface UsePayFrameOptions {
+    orderId: string;
+    /** `next.url` of the checkout answer: the dashboard pay page shown in the iframe. */
+    payUrl: string;
+    /** Absolute URL of the site's thank-you page (same value passed to startCheckout). May carry its own query. */
+    successUrl: string;
+    /** Absolute URL of the site's checkout (same value passed to startCheckout). */
+    cancelUrl: string;
+    domain: string;
+    /** Dashboard base URL (same as getOrderForThankYou). */
+    apiBaseUrl: string;
+    /** The pop-up is shown. Nothing runs while false. */
+    open: boolean;
+    /** The visitor reached the cancel URL (or the pay page said cancelled): the component closes the pop-up and leaves the cart alone. */
+    onCancelled?: () => void;
+    /** close() was called. */
+    onClose?: () => void;
+    /** Test seam / custom navigation of the TOP window. Defaults to `window.location.assign`. */
+    navigateTop?: (url: string) => void;
+}
+interface UsePayFrameResult {
+    /** Attach to the iframe: `ref={frameRef}`. */
+    frameRef: RefObject<HTMLIFrameElement>;
+    /** Call from the iframe's `onLoad`. Same-origin success / cancel URLs are detected; a cross-origin frame is ignored. */
+    onFrameLoad: () => void;
+    /** Stops polling and the message listener, then calls onClose. Close = Back: nothing else changes. */
+    close: () => void;
+}
+/**
+ * Behaviour of the payment pop-up (no visuals, no visitor words). The component renders the iframe
+ * (`src={payUrl}`, `ref={frameRef}`, `onLoad={onFrameLoad}`) and a Back button calling `close()`.
+ * While `open`:
+ *  1. on each iframe load, a same-origin frame at the success page with this orderId navigates the TOP
+ *     window to it; at the cancel page it calls onCancelled (a cross-origin read throws and is ignored);
+ *  2. the order is polled with getOrderForThankYou (ownership token, 4 s, at most 12 requests, then it
+ *     stops by itself); `paid` navigates the top window to `successUrl?orderId=`. The token is kept
+ *     because the thank-you page still needs it;
+ *  3. a `message` event is accepted only from the pay page's origin, shape
+ *     `{type:"tus-payment", status, orderId}` for this orderId: paid navigates, cancelled calls onCancelled.
+ * Everything stops on close, on a first outcome and on unmount.
+ */
+declare function usePayFrame(opts: UsePayFrameOptions): UsePayFrameResult;
+/**
+ * For a page that may be rendered inside the pop-up frame (the cancel page): when framed by a
+ * same-origin top window, loads this page in the top window instead. No-op when not framed, when the
+ * top is cross-origin, or when anything throws.
+ */
+declare function breakOutOfFrame(): void;
 
 interface LinkCouponLine {
     slug: string;
@@ -334,4 +395,4 @@ declare function maxInstallmentsFor(total: number, capabilities: Pick<CheckoutCa
     installmentRules?: InstallmentRule[];
 }): number;
 
-export { CHECKOUT_ERROR_KEYS, type CartDoorItem, type CheckoutCapabilities, type CheckoutCustomer, CheckoutError, type CheckoutErrorKey, type CheckoutNext, type CheckoutTotals, type CheckoutV2Response, type GetOrderForThankYouOptions, type InstallmentRule, type LinkCouponLine, type OrderFull, type OrderItemThin, type OrderThin, POLL_INTERVAL_MS, POLL_MAX_REQUESTS, type StartCartCheckoutInput, type StartCheckoutInput, type StartCheckoutResult, type StartFunnelCheckoutInput, TERMINAL_FINANCIAL_STATUSES, type ThankYouResult, type ThankYouState, type UseLinkCouponOptions, type UseThankYouOrderOptions, type UseThankYouOrderResult, buildCartDoorBody, buildFunnelDoorBody, checkoutErrorKey, getOrderForThankYou, isCheckoutError, maxInstallmentsFor, startCheckout, useLinkCoupon, useThankYouOrder };
+export { CHECKOUT_ERROR_KEYS, type CartDoorItem, type CheckoutCapabilities, type CheckoutCustomer, CheckoutError, type CheckoutErrorKey, type CheckoutNext, type CheckoutTotals, type CheckoutV2Response, type GetOrderForThankYouOptions, type InstallmentRule, type LinkCouponLine, type OrderFull, type OrderItemThin, type OrderThin, POLL_INTERVAL_MS, POLL_MAX_REQUESTS, type PayFrameMessage, type StartCartCheckoutInput, type StartCheckoutInput, type StartCheckoutResult, type StartFunnelCheckoutInput, TERMINAL_FINANCIAL_STATUSES, type ThankYouResult, type ThankYouState, type UseLinkCouponOptions, type UsePayFrameOptions, type UsePayFrameResult, type UseThankYouOrderOptions, type UseThankYouOrderResult, breakOutOfFrame, buildCartDoorBody, buildFunnelDoorBody, checkoutErrorKey, getOrderForThankYou, isCheckoutError, maxInstallmentsFor, startCheckout, useLinkCoupon, usePayFrame, useThankYouOrder };

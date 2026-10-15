@@ -14,7 +14,8 @@ export interface CheckoutTotals {
   currency: string;
 }
 
-export type CheckoutNext = { kind: 'none' } | { kind: 'pay'; url: string };
+/** `display: "redirect"` (optional, only that value): the dashboard asks for a full-page redirect instead of the pay pop-up. */
+export type CheckoutNext = { kind: 'none' } | { kind: 'pay'; url: string; display?: 'redirect' };
 
 /** 200 body of both doors in v2 (closed shape). */
 export interface CheckoutV2Response {

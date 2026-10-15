@@ -12,11 +12,13 @@ interface CheckoutTotals {
     total: number;
     currency: string;
 }
+/** `display: "redirect"` (optional, only that value): the dashboard asks for a full-page redirect instead of the pay pop-up. */
 type CheckoutNext = {
     kind: 'none';
 } | {
     kind: 'pay';
     url: string;
+    display?: 'redirect';
 };
 /** 200 body of both doors in v2 (closed shape). */
 interface CheckoutV2Response {

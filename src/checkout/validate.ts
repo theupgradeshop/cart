@@ -71,7 +71,8 @@ export function parseV2Response(x: unknown): CheckoutV2Response | null {
   let next: CheckoutNext;
   if (n.kind === 'pay') {
     if (!isSafeNavigationUrl(n.url)) return null;
-    next = { kind: 'pay', url: n.url };
+    // Only "redirect" passes through; any other display value is dropped like every server extra (the order already exists, so it must not fail the checkout).
+    next = n.display === 'redirect' ? { kind: 'pay', url: n.url, display: 'redirect' } : { kind: 'pay', url: n.url };
   } else if (n.kind === 'none') {
     next = { kind: 'none' };
   } else {

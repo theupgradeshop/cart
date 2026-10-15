@@ -10,6 +10,8 @@ export {
 export type { GetOrderForThankYouOptions } from './thank-you';
 export { useThankYouOrder } from './use-thank-you-order';
 export type { UseThankYouOrderOptions, UseThankYouOrderResult } from './use-thank-you-order';
+export { usePayFrame, breakOutOfFrame } from './use-pay-frame';
+export type { UsePayFrameOptions, UsePayFrameResult, PayFrameMessage } from './use-pay-frame';
 export { useLinkCoupon } from './use-link-coupon';
 export type { UseLinkCouponOptions, LinkCouponLine } from './use-link-coupon';
 // Errors and types only. getCheckoutCapabilities lives ONLY in ./server so an editor auto-import

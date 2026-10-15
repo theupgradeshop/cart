@@ -353,7 +353,7 @@ Server Component:
   `CHECKOUT_ERROR_KEYS` (includes `shipping_address_required`, a dashboard follow-up not yet emitted), and the types.
   A request slower than `timeoutMs` (default 5000) reads as not available.
 - `@upgradeshop/cart/checkout` (`'use client'`): `startCheckout`, `getOrderForThankYou`,
-  `useThankYouOrder`, `useLinkCoupon`, and re-exports of the errors, body builders and types (NOT
+  `useThankYouOrder`, `usePayFrame`, `breakOutOfFrame`, `useLinkCoupon`, and re-exports of the errors, body builders and types (NOT
   `getCheckoutCapabilities`). Import errors/types from one entry; capabilities only from `./checkout/server`. Use `isCheckoutError(e)`,
   not `instanceof`, since each entry bundles its own copy of the class.
 
@@ -375,6 +375,17 @@ const r = await startCheckout({ door: 'cart', domain, apiBaseUrl, customer, item
   (`paid`, `failed`, `cancelled`, `refunded`), ends a 429 in `not_received`, clears the token only after a
   terminal status, and calls `onPaid` only on `paid` (clear the cart and the pending coupon there). An aborted
   run never clears the token and never calls `onPaid`. Without a stored token it returns the thin response.
+- `usePayFrame({ orderId, payUrl, successUrl, cancelUrl, domain, apiBaseUrl, open, onCancelled, onClose, navigateTop })`
+  (v1.3.0) drives the payment pop-up, behaviour only: the component renders the iframe (`src=payUrl`,
+  `ref={frameRef}`, `onLoad={onFrameLoad}`) and a Back button calling `close()`. On each iframe load a same-origin
+  frame at `successUrl` (origin + path, trailing slash ignored) with `?orderId=` of this order navigates the TOP window
+  to it; at `cancelUrl` it calls `onCancelled` (cart untouched); a cross-origin frame throws on read and is ignored.
+  It also polls the order like `getOrderForThankYou` (4 s, at most 12 requests, token kept) and navigates to
+  `successUrl?orderId=` on `paid`, and accepts a `message` only from the pay URL's origin shaped
+  `{type:"tus-payment", status:"paid"|"cancelled", orderId}` for this order. Everything stops on close, on the first outcome and on unmount.
+  `breakOutOfFrame()` lets the cancel page escape a same-origin frame (no-op otherwise).
+- `next` may carry an optional `display: "redirect"` (only that value passes through; any other value is dropped like every server extra);
+  `startCheckout` still navigates to `next.url` exactly as before.
 - `useLinkCoupon` follows the template's link-coupon recipe but does NOT clear the pending code after an
   auto-apply (a cancel-return re-applies it); the site clears it on remove, a manual apply and a paid thank-you.
 

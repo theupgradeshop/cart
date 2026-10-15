@@ -26,6 +26,7 @@ __export(index_exports, {
   POLL_INTERVAL_MS: () => POLL_INTERVAL_MS,
   POLL_MAX_REQUESTS: () => POLL_MAX_REQUESTS,
   TERMINAL_FINANCIAL_STATUSES: () => TERMINAL_FINANCIAL_STATUSES,
+  breakOutOfFrame: () => breakOutOfFrame,
   buildCartDoorBody: () => buildCartDoorBody,
   buildFunnelDoorBody: () => buildFunnelDoorBody,
   checkoutErrorKey: () => checkoutErrorKey,
@@ -34,6 +35,7 @@ __export(index_exports, {
   maxInstallmentsFor: () => maxInstallmentsFor,
   startCheckout: () => startCheckout,
   useLinkCoupon: () => useLinkCoupon,
+  usePayFrame: () => usePayFrame,
   useThankYouOrder: () => useThankYouOrder
 });
 module.exports = __toCommonJS(index_exports);
@@ -193,7 +195,7 @@ function parseV2Response(x) {
   let next;
   if (n.kind === "pay") {
     if (!isSafeNavigationUrl(n.url)) return null;
-    next = { kind: "pay", url: n.url };
+    next = n.display === "redirect" ? { kind: "pay", url: n.url, display: "redirect" } : { kind: "pay", url: n.url };
   } else if (n.kind === "none") {
     next = { kind: "none" };
   } else {
@@ -335,7 +337,7 @@ async function getOrderForThankYou(orderId, opts) {
           full = "customerEmail" in json;
           const state = stateFor(json.financialStatus);
           if (state) {
-            clearOwnershipToken(orderId);
+            if (!opts.keepToken) clearOwnershipToken(orderId);
             if (state === "paid") safely(() => opts.onPaid?.(json));
             return { state, order: json, full, requests };
           }
@@ -382,14 +384,123 @@ function useThankYouOrder(orderId, opts) {
   return state;
 }
 
-// src/checkout/use-link-coupon.ts
+// src/checkout/use-pay-frame.ts
 var import_react2 = require("react");
+function withOrderId(url, orderId) {
+  const hash = url.indexOf("#");
+  const path = hash === -1 ? url : url.slice(0, hash);
+  const frag = hash === -1 ? "" : url.slice(hash);
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}orderId=${encodeURIComponent(orderId)}${frag}`;
+}
+function normPath(p) {
+  return p.length > 1 ? p.replace(/\/+$/, "") : p;
+}
+function samePage(a, b) {
+  return a.origin === b.origin && normPath(a.pathname) === normPath(b.pathname);
+}
+function parse(u) {
+  try {
+    return new URL(u);
+  } catch {
+    return null;
+  }
+}
+function usePayFrame(opts) {
+  const { orderId, payUrl, successUrl, cancelUrl, domain, apiBaseUrl, open } = opts;
+  const frameRef = (0, import_react2.useRef)(null);
+  const optsRef = (0, import_react2.useRef)(opts);
+  optsRef.current = opts;
+  const doneRef = (0, import_react2.useRef)(false);
+  const stopRef = (0, import_react2.useRef)(() => {
+  });
+  const navigate = (0, import_react2.useCallback)((url) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    stopRef.current();
+    (optsRef.current.navigateTop ?? ((u) => window.location.assign(u)))(url);
+  }, []);
+  const cancel = (0, import_react2.useCallback)(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    stopRef.current();
+    optsRef.current.onCancelled?.();
+  }, []);
+  (0, import_react2.useEffect)(() => {
+    if (!open) return;
+    doneRef.current = false;
+    const ctl = new AbortController();
+    const payOrigin = parse(payUrl)?.origin ?? null;
+    const target = withOrderId(successUrl, orderId);
+    const onMessage = (e) => {
+      if (!payOrigin || e.origin !== payOrigin) return;
+      const d = e.data;
+      if (!d || typeof d !== "object" || d.type !== "tus-payment" || d.orderId !== orderId) return;
+      if (d.status === "paid") navigate(target);
+      else if (d.status === "cancelled") cancel();
+    };
+    window.addEventListener("message", onMessage);
+    stopRef.current = () => {
+      ctl.abort();
+      window.removeEventListener("message", onMessage);
+    };
+    getOrderForThankYou(orderId, { domain, apiBaseUrl, signal: ctl.signal, keepToken: true }).then((r) => {
+      if (!ctl.signal.aborted && r.state === "paid") navigate(target);
+    }).catch(() => {
+    });
+    return () => {
+      stopRef.current();
+      stopRef.current = () => {
+      };
+    };
+  }, [open, orderId, payUrl, successUrl, domain, apiBaseUrl, navigate, cancel]);
+  const onFrameLoad = (0, import_react2.useCallback)(() => {
+    if (!optsRef.current.open || doneRef.current) return;
+    let href;
+    try {
+      const h = frameRef.current?.contentWindow?.location.href;
+      if (!h) return;
+      href = h;
+    } catch {
+      return;
+    }
+    const here = parse(href);
+    if (!here) return;
+    const o = optsRef.current;
+    const success = parse(o.successUrl);
+    const cancelU = parse(o.cancelUrl);
+    if (success && samePage(here, success) && here.searchParams.get("orderId") === o.orderId) {
+      navigate(href);
+    } else if (cancelU && samePage(here, cancelU)) {
+      cancel();
+    }
+  }, [navigate, cancel]);
+  const close = (0, import_react2.useCallback)(() => {
+    doneRef.current = true;
+    stopRef.current();
+    optsRef.current.onClose?.();
+  }, []);
+  (0, import_react2.useEffect)(() => () => stopRef.current(), []);
+  return { frameRef, onFrameLoad, close };
+}
+function breakOutOfFrame() {
+  try {
+    if (window.self === window.top) return;
+    const top = window.top;
+    if (!top || top.location.origin !== window.location.origin) return;
+    top.location.assign(window.location.href);
+  } catch {
+  }
+}
+
+// src/checkout/use-link-coupon.ts
+var import_react3 = require("react");
 function useLinkCoupon(o) {
-  const tried = (0, import_react2.useRef)("");
-  const latest = (0, import_react2.useRef)(o);
+  const tried = (0, import_react3.useRef)("");
+  const latest = (0, import_react3.useRef)(o);
   latest.current = o;
   const sig = o.ready ? `${o.lines.map((l) => `${l.slug}:${l.quantity ?? 1}:${l.price}`).join("|")}#${o.subtotal}` : "";
-  (0, import_react2.useEffect)(() => {
+  (0, import_react3.useEffect)(() => {
     if (!sig || o.appliedCode || o.hasTypedText || !o.collecting) return;
     const pending = o.readPending();
     if (!pending) return;
@@ -446,6 +557,7 @@ function maxInstallmentsFor(total, capabilities) {
   POLL_INTERVAL_MS,
   POLL_MAX_REQUESTS,
   TERMINAL_FINANCIAL_STATUSES,
+  breakOutOfFrame,
   buildCartDoorBody,
   buildFunnelDoorBody,
   checkoutErrorKey,
@@ -454,5 +566,6 @@ function maxInstallmentsFor(total, capabilities) {
   maxInstallmentsFor,
   startCheckout,
   useLinkCoupon,
+  usePayFrame,
   useThankYouOrder
 });
