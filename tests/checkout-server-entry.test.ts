@@ -19,4 +19,16 @@ describe('dist/checkout/server.* is server-safe', () => {
       expect(readFileSync(join(dist, f), 'utf8').startsWith("'use client';")).toBe(true);
     }
   });
+  it('usePayFrame lives only in the pay-frame entry, which keeps its directive', () => {
+    for (const f of ['index.js', 'index.mjs', 'server.js', 'server.mjs']) {
+      expect(readFileSync(join(dist, f), 'utf8')).not.toMatch(/usePayFrame|breakOutOfFrame|tus-payment/);
+    }
+    for (const f of ['pay-frame.js', 'pay-frame.mjs']) {
+      const src = readFileSync(join(dist, f), 'utf8');
+      expect(src.startsWith("'use client';")).toBe(true);
+      expect(src).toMatch(/usePayFrame/);
+      expect(src).toMatch(/breakOutOfFrame/);
+    }
+    for (const f of ['pay-frame.d.ts', 'pay-frame.d.mts']) expect(existsSync(join(dist, f))).toBe(true);
+  });
 });

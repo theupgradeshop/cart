@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { usePayFrame, breakOutOfFrame, POLL_INTERVAL_MS } from '../src/checkout';
+import { POLL_INTERVAL_MS } from '../src/checkout';
+import { usePayFrame, breakOutOfFrame } from '../src/checkout/pay-frame';
 import { parseV2Response } from '../src/checkout/validate';
 import { ORDER_ID, orderFull } from '../src/checkout/__fixtures__/contract-v2';
 

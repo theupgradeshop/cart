@@ -28,6 +28,18 @@ export default defineConfig([
     },
   },
   {
+    // Pay pop-up entry: its own chunk so the checkout form's first load does not carry it.
+    entry: ['src/checkout/pay-frame.ts'],
+    outDir: 'dist/checkout',
+    format: ['cjs', 'esm'],
+    dts: true,
+    clean: false,
+    external: ['react', 'react-dom', 'next'],
+    banner: {
+      js: "'use client';",
+    },
+  },
+  {
     // Server-safe entry: NO 'use client' banner, no React import (checked by tests/checkout-server-entry.test.ts).
     entry: ['src/checkout/server.ts'],
     outDir: 'dist/checkout',
