@@ -373,16 +373,23 @@ const r = await startCheckout({ door: 'cart', domain, apiBaseUrl, customer, item
 - `getOrderForThankYou(orderId, { domain, apiBaseUrl, onPaid, onUpdate, signal })` sends the stored token as
   `Authorization: Bearer` (never in a URL), polls every 4 s up to 12 requests while the status is not terminal
   (`paid`, `failed`, `cancelled`, `refunded`), ends a 429 in `not_received`, clears the token only after a
-  terminal status, and calls `onPaid` only on `paid` (clear the cart and the pending coupon there). An aborted
+  terminal status, and calls `onPaid` only on `paid`. Inside a SAME-ORIGIN frame (`window.self !== window.top` and the top window's origin equals this page's, e.g. the pay pop-up's iframe landing on the thank-you page; a cross-origin top, or one whose read throws, counts as unframed and polls normally) it keeps the token and does not call `onPaid`, and `useThankYouOrder` makes no request and stays `confirming` until the top window reloads the page (otherwise the frame would clear the shared token and the top page would get the thin order) (clear the cart and the pending coupon there). An aborted
   run never clears the token and never calls `onPaid`. Without a stored token it returns the thin response.
 - `usePayFrame({ orderId, payUrl, successUrl, cancelUrl, domain, apiBaseUrl, open, onCancelled, onClose, navigateTop })`
   (v1.3.0; its own entry `@upgradeshop/cart/checkout/pay-frame` since v1.3.1, `'use client'`, so a site loads it lazily with the pop-up) drives the payment pop-up, behaviour only: the component renders the iframe (`src=payUrl`,
   `ref={frameRef}`, `onLoad={onFrameLoad}`) and a Back button calling `close()`. On each iframe load a same-origin
   frame at `successUrl` (origin + path, trailing slash ignored) with `?orderId=` of this order navigates the TOP window
   to it; at `cancelUrl` it calls `onCancelled` (cart untouched); a cross-origin frame throws on read and is ignored.
-  It also polls the order like `getOrderForThankYou` (4 s, at most 12 requests, token kept) and navigates to
-  `successUrl?orderId=` on `paid`, and accepts a `message` only from the pay URL's origin shaped
-  `{type:"tus-payment", status:"paid"|"cancelled", orderId}` for this order. Everything stops on close, on the first outcome and on unmount.
+  It also polls the order on its own schedule, `PAY_FRAME_POLL_GAPS_MS`: the first request at once, then gaps of
+  4 s x5, 15 s x4, 45 s x4, i.e. 14 requests over 260 s (about 4.3 minutes), so the pop-up's 14 plus the thank-you
+  page's 12 stay under the orders route's 30 per 15 minutes with room for one reload. `paid` navigates to
+  `successUrl?orderId=`; a failed or cancelled status does nothing (the pay page shows its own error and may offer a
+  retry) and polling goes on; a 404 or 429 ends it. The token is never cleared by the pop-up. A `message` is accepted only
+  from the pay URL's origin AND from the iframe's own window (`event.source`), shaped
+  `{type:"tus-payment", status:"paid"|"cancelled", orderId}` for this order. The first outcome wins (one navigation
+  or one `onCancelled`); once it happened `close()` does nothing, so the form is not unlocked after a paid. A frame-load
+  success navigates to `successUrl?orderId=` (never the frame's raw URL). Everything stops on close, on the first
+  outcome and on unmount; setting `open` false then true starts a fresh session.
   `breakOutOfFrame()` (same entry) lets the cancel page escape a same-origin frame (no-op otherwise).
 - `next` may carry an optional `display: "redirect"` (only that value passes through; any other value is dropped like every server extra);
   `startCheckout` still navigates to `next.url` exactly as before.

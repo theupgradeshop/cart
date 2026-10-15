@@ -21,6 +21,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/checkout/pay-frame.ts
 var pay_frame_exports = {};
 __export(pay_frame_exports, {
+  PAY_FRAME_POLL_GAPS_MS: () => PAY_FRAME_POLL_GAPS_MS,
   breakOutOfFrame: () => breakOutOfFrame,
   usePayFrame: () => usePayFrame
 });
@@ -38,99 +39,23 @@ function readOwnershipToken(orderId) {
     return null;
   }
 }
-function clearOwnershipToken(orderId) {
-  try {
-    window.sessionStorage.removeItem(PREFIX + orderId);
-  } catch {
-  }
-}
-
-// src/checkout/thank-you.ts
-var POLL_INTERVAL_MS = 4e3;
-var POLL_MAX_REQUESTS = 12;
-function stateFor(financialStatus) {
-  switch (financialStatus) {
-    case "paid":
-      return "paid";
-    case "failed":
-    case "cancelled":
-      return "declined";
-    case "refunded":
-      return "refunded";
-    default:
-      return null;
-  }
-}
-function safely(fn) {
-  try {
-    fn();
-  } catch {
-  }
-}
-function sleep(ms, signal) {
-  return new Promise((resolve) => {
-    const onAbort = () => {
-      clearTimeout(t);
-      resolve();
-    };
-    const t = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
-async function getOrderForThankYou(orderId, opts) {
-  const base = opts.apiBaseUrl.replace(/\/+$/, "");
-  const token = readOwnershipToken(orderId);
-  const url = `${base}/api/public/orders/${encodeURIComponent(orderId)}?domain=${encodeURIComponent(opts.domain)}`;
-  const headers = token ? { Authorization: `Bearer ${token}` } : {};
-  let requests = 0;
-  let last = null;
-  let full = false;
-  while (requests < POLL_MAX_REQUESTS) {
-    if (opts.signal?.aborted) break;
-    if (requests > 0) {
-      await sleep(POLL_INTERVAL_MS, opts.signal);
-      if (opts.signal?.aborted) break;
-    }
-    requests += 1;
-    let res = null;
-    try {
-      res = await fetch(url, { headers, signal: opts.signal });
-    } catch {
-      res = null;
-    }
-    if (opts.signal?.aborted) break;
-    if (res) {
-      if (res.status === 429) return { state: "not_received", order: last, full, requests };
-      if (res.status === 404) return { state: "not_found", order: null, full: false, requests };
-      if (res.ok) {
-        let json = null;
-        try {
-          json = await res.json();
-        } catch {
-          json = null;
-        }
-        if (opts.signal?.aborted) break;
-        if (json && typeof json.financialStatus === "string") {
-          last = json;
-          full = "customerEmail" in json;
-          const state = stateFor(json.financialStatus);
-          if (state) {
-            if (!opts.keepToken) clearOwnershipToken(orderId);
-            if (state === "paid") safely(() => opts.onPaid?.(json));
-            return { state, order: json, full, requests };
-          }
-          safely(() => opts.onUpdate?.(json));
-        }
-      }
-    }
-  }
-  return { state: "not_received", order: last, full, requests };
-}
 
 // src/checkout/use-pay-frame.ts
+var PAY_FRAME_POLL_GAPS_MS = [
+  4e3,
+  4e3,
+  4e3,
+  4e3,
+  4e3,
+  15e3,
+  15e3,
+  15e3,
+  15e3,
+  45e3,
+  45e3,
+  45e3,
+  45e3
+];
 function withOrderId(url, orderId) {
   const hash = url.indexOf("#");
   const path = hash === -1 ? url : url.slice(0, hash);
@@ -179,6 +104,8 @@ function usePayFrame(opts) {
     const target = withOrderId(successUrl, orderId);
     const onMessage = (e) => {
       if (!payOrigin || e.origin !== payOrigin) return;
+      const frameWin = frameRef.current?.contentWindow;
+      if (!frameWin || e.source !== frameWin) return;
       const d = e.data;
       if (!d || typeof d !== "object" || d.type !== "tus-payment" || d.orderId !== orderId) return;
       if (d.status === "paid") navigate(target);
@@ -189,10 +116,40 @@ function usePayFrame(opts) {
       ctl.abort();
       window.removeEventListener("message", onMessage);
     };
-    getOrderForThankYou(orderId, { domain, apiBaseUrl, signal: ctl.signal, keepToken: true }).then((r) => {
-      if (!ctl.signal.aborted && r.state === "paid") navigate(target);
-    }).catch(() => {
-    });
+    const token = readOwnershipToken(orderId);
+    const pollUrl = `${apiBaseUrl.replace(/\/+$/, "")}/api/public/orders/${encodeURIComponent(orderId)}?domain=${encodeURIComponent(domain)}`;
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    let timer = null;
+    const prevStop = stopRef.current;
+    stopRef.current = () => {
+      prevStop();
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+    };
+    const poll = async (n) => {
+      if (ctl.signal.aborted) return;
+      let end = false;
+      try {
+        const res = await fetch(pollUrl, { headers, signal: ctl.signal });
+        if (ctl.signal.aborted) return;
+        if (res.status === 429 || res.status === 404) end = true;
+        else if (res.ok) {
+          const json = await res.json();
+          if (ctl.signal.aborted) return;
+          if (json && json.financialStatus === "paid") {
+            navigate(target);
+            return;
+          }
+        }
+      } catch {
+      }
+      if (end || ctl.signal.aborted || n >= PAY_FRAME_POLL_GAPS_MS.length) return;
+      timer = setTimeout(() => {
+        timer = null;
+        void poll(n + 1);
+      }, PAY_FRAME_POLL_GAPS_MS[n]);
+    };
+    void poll(0);
     return () => {
       stopRef.current();
       stopRef.current = () => {
@@ -215,12 +172,13 @@ function usePayFrame(opts) {
     const success = parse(o.successUrl);
     const cancelU = parse(o.cancelUrl);
     if (success && samePage(here, success) && here.searchParams.get("orderId") === o.orderId) {
-      navigate(href);
+      navigate(withOrderId(o.successUrl, o.orderId));
     } else if (cancelU && samePage(here, cancelU)) {
       cancel();
     }
   }, [navigate, cancel]);
   const close = (0, import_react.useCallback)(() => {
+    if (doneRef.current) return;
     doneRef.current = true;
     stopRef.current();
     optsRef.current.onClose?.();
@@ -239,6 +197,7 @@ function breakOutOfFrame() {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  PAY_FRAME_POLL_GAPS_MS,
   breakOutOfFrame,
   usePayFrame
 });

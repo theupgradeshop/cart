@@ -217,7 +217,7 @@ type UseThankYouOrderResult = {
 } | ({
     status: 'done';
 } & ThankYouResult);
-/** Drives the thank-you page: `confirming` while polling, then `done` with one of the states. */
+/** Drives the thank-you page: `confirming` while polling, then `done` with one of the states. Inside a same-origin frame it never polls. */
 declare function useThankYouOrder(orderId: string | null, opts: UseThankYouOrderOptions): UseThankYouOrderResult;
 
 interface LinkCouponLine {

@@ -17,6 +17,20 @@ export const POLL_MAX_REQUESTS = 12;
  */
 export const TERMINAL_FINANCIAL_STATUSES: readonly string[] = ['paid', 'failed', 'cancelled', 'refunded'];
 
+/**
+ * True inside a frame whose top window is on the SAME origin (the pay pop-up's iframe landing on the
+ * thank-you page). A cross-origin top (reading it throws, or its origin differs) is false: a site embedded
+ * by someone else keeps behaving as an unframed page.
+ */
+export function isInSameOriginFrame(): boolean {
+  try {
+    if (window.self === window.top) return false;
+    return window.top!.location.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 function stateFor(financialStatus: string): ThankYouState | null {
   switch (financialStatus) {
     case 'paid':
@@ -71,6 +85,9 @@ export async function getOrderForThankYou(orderId: string, opts: GetOrderForThan
   const url = `${base}/api/public/orders/${encodeURIComponent(orderId)}?domain=${encodeURIComponent(opts.domain)}`;
   const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
+  // Inside a same-origin frame (the pay pop-up's iframe landing on the thank-you page) the token stays in the shared
+  // sessionStorage and the cart is not cleared: the top window reloads this page and must get the full order.
+  const framed = isInSameOriginFrame();
   let requests = 0;
   let last: OrderThin | OrderFull | null = null;
   let full = false;
@@ -107,8 +124,8 @@ export async function getOrderForThankYou(orderId: string, opts: GetOrderForThan
           full = 'customerEmail' in json;
           const state = stateFor(json.financialStatus);
           if (state) {
-            if (!opts.keepToken) clearOwnershipToken(orderId);
-            if (state === 'paid') safely(() => opts.onPaid?.(json!));
+            if (!opts.keepToken && !framed) clearOwnershipToken(orderId);
+            if (state === 'paid' && !framed) safely(() => opts.onPaid?.(json!));
             return { state, order: json, full, requests };
           }
           safely(() => opts.onUpdate?.(json!));

@@ -265,6 +265,14 @@ async function startCheckout(input) {
 var POLL_INTERVAL_MS = 4e3;
 var POLL_MAX_REQUESTS = 12;
 var TERMINAL_FINANCIAL_STATUSES = ["paid", "failed", "cancelled", "refunded"];
+function isInSameOriginFrame() {
+  try {
+    if (window.self === window.top) return false;
+    return window.top.location.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
 function stateFor(financialStatus) {
   switch (financialStatus) {
     case "paid":
@@ -302,6 +310,7 @@ async function getOrderForThankYou(orderId, opts) {
   const token = readOwnershipToken(orderId);
   const url = `${base}/api/public/orders/${encodeURIComponent(orderId)}?domain=${encodeURIComponent(opts.domain)}`;
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const framed = isInSameOriginFrame();
   let requests = 0;
   let last = null;
   let full = false;
@@ -335,8 +344,8 @@ async function getOrderForThankYou(orderId, opts) {
           full = "customerEmail" in json;
           const state = stateFor(json.financialStatus);
           if (state) {
-            if (!opts.keepToken) clearOwnershipToken(orderId);
-            if (state === "paid") safely(() => opts.onPaid?.(json));
+            if (!opts.keepToken && !framed) clearOwnershipToken(orderId);
+            if (state === "paid" && !framed) safely(() => opts.onPaid?.(json));
             return { state, order: json, full, requests };
           }
           safely(() => opts.onUpdate?.(json));
@@ -362,8 +371,9 @@ function useThankYouOrder(orderId, opts) {
       setState(NO_ORDER);
       return;
     }
-    const ctl = new AbortController();
     setState({ status: "confirming", order: null });
+    if (isInSameOriginFrame()) return;
+    const ctl = new AbortController();
     getOrderForThankYou(orderId, {
       domain,
       apiBaseUrl,

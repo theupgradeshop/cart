@@ -195,3 +195,39 @@ describe('getOrderForThankYou', () => {
     expect(remove).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('getOrderForThankYou inside a same-origin frame', () => {
+  const frame = () => vi.spyOn(window, 'top', 'get').mockReturnValue({ location: { origin: window.location.origin } } as unknown as Window);
+  afterEach(() => vi.restoreAllMocks());
+
+  it('keeps the token and does not call onPaid on a paid order (the top window needs both)', async () => {
+    frame();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok(orderFull('paid'))));
+    const onPaid = vi.fn();
+    const r = await getOrderForThankYou(ORDER_ID, { ...opts, onPaid });
+    expect(r.state).toBe('paid');
+    expect(readOwnershipToken(ORDER_ID)).toBe(OWNERSHIP_TOKEN);
+    expect(onPaid).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the top read throws', () => vi.spyOn(window, 'top', 'get').mockImplementation(() => { throw new DOMException('x', 'SecurityError'); })],
+    ['the top location read throws', () => vi.spyOn(window, 'top', 'get').mockReturnValue({ get location(): never { throw new DOMException('x', 'SecurityError'); } } as unknown as Window)],
+    ['the top origin differs', () => vi.spyOn(window, 'top', 'get').mockReturnValue({ location: { origin: 'https://other.test' } } as unknown as Window)],
+  ])('a cross-origin top (%s) behaves as unframed: token cleared, onPaid fires', async (_n, arrange) => {
+    arrange();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok(orderFull('paid'))));
+    const onPaid = vi.fn();
+    await getOrderForThankYou(ORDER_ID, { ...opts, onPaid });
+    expect(readOwnershipToken(ORDER_ID)).toBeNull();
+    expect(onPaid).toHaveBeenCalledTimes(1);
+  });
+
+  it('unframed behaviour is unchanged: token cleared, onPaid fires', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok(orderFull('paid'))));
+    const onPaid = vi.fn();
+    await getOrderForThankYou(ORDER_ID, { ...opts, onPaid });
+    expect(readOwnershipToken(ORDER_ID)).toBeNull();
+    expect(onPaid).toHaveBeenCalledTimes(1);
+  });
+});

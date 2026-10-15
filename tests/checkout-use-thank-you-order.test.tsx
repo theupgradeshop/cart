@@ -28,4 +28,31 @@ describe('useThankYouOrder', () => {
     expect(latest).toHaveBeenCalledTimes(1);
     expect(first).not.toHaveBeenCalled();
   });
+
+  it('inside a frame it makes no request, keeps the token, never calls onPaid and stays confirming', async () => {
+    const spy = vi.spyOn(window, 'top', 'get').mockReturnValue({ location: { origin: window.location.origin } } as unknown as Window);
+    sessionStorage.setItem(`upgradeshop.checkout.ownership.${ORDER_ID}`, 'tok');
+    const f = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => orderFull('paid') });
+    vi.stubGlobal('fetch', f);
+    const onPaid = vi.fn();
+    const { result } = renderHook(() => useThankYouOrder(ORDER_ID, { ...opts, onPaid }));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(f).not.toHaveBeenCalled();
+    expect(onPaid).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(`upgradeshop.checkout.ownership.${ORDER_ID}`)).toBe('tok');
+    expect(result.current).toEqual({ status: 'confirming', order: null });
+    spy.mockRestore();
+  });
+
+  it('under a cross-origin top it polls normally and reaches done', async () => {
+    const spy = vi.spyOn(window, 'top', 'get').mockImplementation(() => { throw new DOMException('x', 'SecurityError'); });
+    const f = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => orderFull('paid') });
+    vi.stubGlobal('fetch', f);
+    const onPaid = vi.fn();
+    const { result } = renderHook(() => useThankYouOrder(ORDER_ID, { ...opts, onPaid }));
+    await waitFor(() => expect(result.current.status).toBe('done'));
+    expect(f).toHaveBeenCalled();
+    expect(onPaid).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
 });
