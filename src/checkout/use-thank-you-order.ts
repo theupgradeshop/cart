@@ -8,6 +8,8 @@ export interface UseThankYouOrderOptions {
   apiBaseUrl: string;
   /** Fires once on a terminal PAID status: clear the cart and the pending coupon here. */
   onPaid?: (order: OrderThin | OrderFull) => void;
+  /** The page language; sent so the dashboard's `paymentMessage` is written in it. */
+  locale?: string;
 }
 
 export type UseThankYouOrderResult =
@@ -21,7 +23,7 @@ export function useThankYouOrder(orderId: string | null, opts: UseThankYouOrderO
   const [state, setState] = useState<UseThankYouOrderResult>(
     orderId ? { status: 'confirming', order: null } : NO_ORDER,
   );
-  const { domain, apiBaseUrl } = opts;
+  const { domain, apiBaseUrl, locale } = opts;
   const onPaidRef = useRef(opts.onPaid);
   onPaidRef.current = opts.onPaid;
 
@@ -38,6 +40,7 @@ export function useThankYouOrder(orderId: string | null, opts: UseThankYouOrderO
     getOrderForThankYou(orderId, {
       domain,
       apiBaseUrl,
+      locale,
       onPaid: (order) => onPaidRef.current?.(order),
       signal: ctl.signal,
       onUpdate: (order) => { if (!ctl.signal.aborted) setState({ status: 'confirming', order }); },
@@ -49,7 +52,7 @@ export function useThankYouOrder(orderId: string | null, opts: UseThankYouOrderO
         if (!ctl.signal.aborted) setState({ status: 'done', state: 'not_received', order: null, full: false, requests: 0 });
       });
     return () => ctl.abort();
-  }, [orderId, domain, apiBaseUrl]);
+  }, [orderId, domain, apiBaseUrl, locale]);
 
   return state;
 }

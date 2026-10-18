@@ -370,11 +370,17 @@ const r = await startCheckout({ door: 'cart', domain, apiBaseUrl, customer, item
   An unsafe `funnelNextUrl` does not fail the order: it becomes `null`.
 - Errors: `CheckoutError.key` is one of `CHECKOUT_ERROR_KEYS`; `product_unavailable` also carries `items`
   (the failing slugs).
-- `getOrderForThankYou(orderId, { domain, apiBaseUrl, onPaid, onUpdate, signal })` sends the stored token as
+- `getOrderForThankYou(orderId, { domain, apiBaseUrl, onPaid, onUpdate, signal, locale })` sends the stored token as
   `Authorization: Bearer` (never in a URL), polls every 4 s up to 12 requests while the status is not terminal
   (`paid`, `failed`, `cancelled`, `refunded`), ends a 429 in `not_received`, clears the token only after a
   terminal status, and calls `onPaid` only on `paid`. Inside a SAME-ORIGIN frame (`window.self !== window.top` and the top window's origin equals this page's, e.g. the pay pop-up's iframe landing on the thank-you page; a cross-origin top, or one whose read throws, counts as unframed and polls normally) it keeps the token and does not call `onPaid`, and `useThankYouOrder` makes no request and stays `confirming` until the top window reloads the page (otherwise the frame would clear the shared token and the top page would get the thin order) (clear the cart and the pending coupon there). An aborted
   run never clears the token and never calls `onPaid`. Without a stored token it returns the thin response.
+  Payment message (v1.3.3): the order answer may carry `paymentState` and `paymentMessage` (the dashboard's buyer sentence,
+  already translated; plain text, never HTML). `locale` (also an option of `useThankYouOrder`) is sent as `&locale=` so the
+  sentence is in the page language; omitted, the dashboard uses the order's language. When polling ends in `not_received`
+  and the latest answer had a non-null `paymentState`, the result also carries `paymentState` and (when non-empty)
+  `paymentMessage`; the `state` values are unchanged and a result without a payment state has neither key. While
+  `confirming`, `order.paymentMessage` is available on the latest order. The fields also ride the terminal `declined` result. The package never maps a state to text itself. The template, for `paymentState` `paid_not_applied` (payment received, not applied), shows its confirming heading plus the dashboard sentence in both `declined` and `not_received`, and no back-to-checkout button, because a second payment would be the risk.
 - `usePayFrame({ orderId, payUrl, successUrl, cancelUrl, domain, apiBaseUrl, open, onCancelled, onClose, navigateTop })`
   (v1.3.0; its own entry `@upgradeshop/cart/checkout/pay-frame` since v1.3.1, `'use client'`, so a site loads it lazily with the pop-up) drives the payment pop-up, behaviour only: the component renders the iframe (`src=payUrl`,
   `ref={frameRef}`, `onLoad={onFrameLoad}`) and a Back button calling `close()`. On each iframe load a same-origin

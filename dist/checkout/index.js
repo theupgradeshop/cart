@@ -286,6 +286,10 @@ function stateFor(financialStatus) {
       return null;
   }
 }
+function paymentFields(order) {
+  if (!order || typeof order.paymentState !== "string" || !order.paymentState) return {};
+  return typeof order.paymentMessage === "string" && order.paymentMessage ? { paymentState: order.paymentState, paymentMessage: order.paymentMessage } : { paymentState: order.paymentState };
+}
 function safely(fn) {
   try {
     fn();
@@ -308,7 +312,7 @@ function sleep(ms, signal) {
 async function getOrderForThankYou(orderId, opts) {
   const base = opts.apiBaseUrl.replace(/\/+$/, "");
   const token = readOwnershipToken(orderId);
-  const url = `${base}/api/public/orders/${encodeURIComponent(orderId)}?domain=${encodeURIComponent(opts.domain)}`;
+  const url = `${base}/api/public/orders/${encodeURIComponent(orderId)}?domain=${encodeURIComponent(opts.domain)}${opts.locale ? `&locale=${encodeURIComponent(opts.locale)}` : ""}`;
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
   const framed = isInSameOriginFrame();
   let requests = 0;
@@ -329,7 +333,7 @@ async function getOrderForThankYou(orderId, opts) {
     }
     if (opts.signal?.aborted) break;
     if (res) {
-      if (res.status === 429) return { state: "not_received", order: last, full, requests };
+      if (res.status === 429) return { state: "not_received", order: last, full, requests, ...paymentFields(last) };
       if (res.status === 404) return { state: "not_found", order: null, full: false, requests };
       if (res.ok) {
         let json = null;
@@ -346,14 +350,14 @@ async function getOrderForThankYou(orderId, opts) {
           if (state) {
             if (!opts.keepToken && !framed) clearOwnershipToken(orderId);
             if (state === "paid" && !framed) safely(() => opts.onPaid?.(json));
-            return { state, order: json, full, requests };
+            return { state, order: json, full, requests, ...state === "declined" ? paymentFields(json) : {} };
           }
           safely(() => opts.onUpdate?.(json));
         }
       }
     }
   }
-  return { state: "not_received", order: last, full, requests };
+  return { state: "not_received", order: last, full, requests, ...paymentFields(last) };
 }
 
 // src/checkout/use-thank-you-order.ts
@@ -363,7 +367,7 @@ function useThankYouOrder(orderId, opts) {
   const [state, setState] = (0, import_react.useState)(
     orderId ? { status: "confirming", order: null } : NO_ORDER
   );
-  const { domain, apiBaseUrl } = opts;
+  const { domain, apiBaseUrl, locale } = opts;
   const onPaidRef = (0, import_react.useRef)(opts.onPaid);
   onPaidRef.current = opts.onPaid;
   (0, import_react.useEffect)(() => {
@@ -377,6 +381,7 @@ function useThankYouOrder(orderId, opts) {
     getOrderForThankYou(orderId, {
       domain,
       apiBaseUrl,
+      locale,
       onPaid: (order) => onPaidRef.current?.(order),
       signal: ctl.signal,
       onUpdate: (order) => {
@@ -388,7 +393,7 @@ function useThankYouOrder(orderId, opts) {
       if (!ctl.signal.aborted) setState({ status: "done", state: "not_received", order: null, full: false, requests: 0 });
     });
     return () => ctl.abort();
-  }, [orderId, domain, apiBaseUrl]);
+  }, [orderId, domain, apiBaseUrl, locale]);
   return state;
 }
 

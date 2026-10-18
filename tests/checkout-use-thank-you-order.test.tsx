@@ -55,4 +55,18 @@ describe('useThankYouOrder', () => {
     expect(onPaid).toHaveBeenCalledTimes(1);
     spy.mockRestore();
   });
+  it('passes the locale to the order request', async () => {
+    const f = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => orderFull('paid') });
+    vi.stubGlobal('fetch', f);
+    const { result } = renderHook(() => useThankYouOrder(ORDER_ID, { ...opts, locale: 'he' }));
+    await waitFor(() => expect(result.current.status).toBe('done'));
+    expect(String(f.mock.calls[0][0])).toContain('&locale=he');
+  });
+
+  it('a confirming order exposes the dashboard message on order', async () => {
+    const pendingOrder = { ...orderFull('pending'), paymentState: 'confirming', paymentMessage: 'We are confirming.' };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => pendingOrder }));
+    const { result } = renderHook(() => useThankYouOrder(ORDER_ID, opts));
+    await waitFor(() => expect(result.current).toMatchObject({ status: 'confirming', order: { paymentMessage: 'We are confirming.' } }));
+  });
 });

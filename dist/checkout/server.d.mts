@@ -134,6 +134,10 @@ interface OrderThin {
     items: OrderItemThin[];
     paidAt: string | null;
     createdAt: string | null;
+    /** Stable payment state code from the dashboard while the order is pending (e.g. "confirming", "delayed"); absent or null otherwise. */
+    paymentState?: string | null;
+    /** The buyer sentence for `paymentState`, translated by the dashboard (plain text). Show it as text, never as HTML. Null when `paymentState` is. */
+    paymentMessage?: string | null;
 }
 /** The full shape (valid ownership token): PII and download links. */
 interface OrderFull extends Omit<OrderThin, 'items'> {
@@ -164,6 +168,10 @@ interface ThankYouResult {
     full: boolean;
     /** Requests made, for the 12-request cap. */
     requests: number;
+    /** From the latest response, present only when the dashboard sent a non-null `paymentState` (a pending order that polling gave up on, or a terminal `declined` answer). */
+    paymentState?: string;
+    /** The dashboard's buyer sentence for `paymentState` (plain text), present only with it and only when non-empty. */
+    paymentMessage?: string;
 }
 
 /**

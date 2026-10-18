@@ -231,3 +231,68 @@ describe('getOrderForThankYou inside a same-origin frame', () => {
     expect(onPaid).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('getOrderForThankYou payment message (v1.3.3)', () => {
+  const pending = (extra: Record<string, unknown>) => ({ ...orderFull('pending'), ...extra });
+
+  it('sends &locale= when the caller gives one, and not otherwise', async () => {
+    const f = vi.fn().mockResolvedValue(ok(orderFull('paid')));
+    vi.stubGlobal('fetch', f);
+    await getOrderForThankYou(ORDER_ID, { ...opts, locale: 'he' });
+    expect(f.mock.calls[0][0]).toBe(`${BASE}/api/public/orders/${ORDER_ID}?domain=shop.test&locale=he`);
+    await getOrderForThankYou(ORDER_ID, opts);
+    expect(f.mock.calls[1][0]).toBe(`${BASE}/api/public/orders/${ORDER_ID}?domain=shop.test`);
+  });
+
+  it('a pending order that polling gives up on carries the latest paymentState and paymentMessage', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok(pending({ paymentState: 'delayed', paymentMessage: 'Still confirming.' }))));
+    const p = getOrderForThankYou(ORDER_ID, opts);
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 20);
+    const r = await p;
+    expect(r).toMatchObject({ state: 'not_received', paymentState: 'delayed', paymentMessage: 'Still confirming.' });
+  });
+
+  it('null paymentState: the result is exactly today\'s, with neither key', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok(pending({ paymentState: null, paymentMessage: null }))));
+    const p = getOrderForThankYou(ORDER_ID, opts);
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 20);
+    const r = await p;
+    expect(Object.keys(r).sort()).toEqual(['full', 'order', 'requests', 'state']);
+  });
+
+  it('paid stays unchanged even if the answer carries payment fields', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok({ ...orderFull('paid'), paymentState: null, paymentMessage: null })));
+    const r = await getOrderForThankYou(ORDER_ID, opts);
+    expect(Object.keys(r).sort()).toEqual(['full', 'order', 'requests', 'state']);
+  });
+  it('a 429 after a pending answer carries that answer\'s payment fields', async () => {
+    const f = vi.fn()
+      .mockResolvedValueOnce(ok(pending({ paymentState: 'confirming', paymentMessage: 'Confirming.' })))
+      .mockResolvedValue(status(429));
+    vi.stubGlobal('fetch', f);
+    const p = getOrderForThankYou(ORDER_ID, opts);
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 3);
+    expect(await p).toMatchObject({ state: 'not_received', paymentState: 'confirming', paymentMessage: 'Confirming.' });
+  });
+
+  it('a paymentState with an empty message gives a key-only result', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok(pending({ paymentState: 'delayed', paymentMessage: '' }))));
+    const p = getOrderForThankYou(ORDER_ID, opts);
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 20);
+    const r = await p;
+    expect(r.paymentState).toBe('delayed');
+    expect('paymentMessage' in r).toBe(false);
+  });
+
+  it('declined carries the payment fields (paid_not_applied on a failed order)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok({ ...orderFull('failed'), paymentState: 'paid_not_applied', paymentMessage: 'We received your payment.' })));
+    const r = await getOrderForThankYou(ORDER_ID, opts);
+    expect(r).toMatchObject({ state: 'declined', paymentState: 'paid_not_applied', paymentMessage: 'We received your payment.' });
+  });
+
+  it('declined with a null state has no payment keys', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok({ ...orderFull('failed'), paymentState: null, paymentMessage: null })));
+    const r = await getOrderForThankYou(ORDER_ID, opts);
+    expect(Object.keys(r).sort()).toEqual(['full', 'order', 'requests', 'state']);
+  });
+});

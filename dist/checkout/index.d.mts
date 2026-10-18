@@ -134,6 +134,10 @@ interface OrderThin {
     items: OrderItemThin[];
     paidAt: string | null;
     createdAt: string | null;
+    /** Stable payment state code from the dashboard while the order is pending (e.g. "confirming", "delayed"); absent or null otherwise. */
+    paymentState?: string | null;
+    /** The buyer sentence for `paymentState`, translated by the dashboard (plain text). Show it as text, never as HTML. Null when `paymentState` is. */
+    paymentMessage?: string | null;
 }
 /** The full shape (valid ownership token): PII and download links. */
 interface OrderFull extends Omit<OrderThin, 'items'> {
@@ -164,6 +168,10 @@ interface ThankYouResult {
     full: boolean;
     /** Requests made, for the 12-request cap. */
     requests: number;
+    /** From the latest response, present only when the dashboard sent a non-null `paymentState` (a pending order that polling gave up on, or a terminal `declined` answer). */
+    paymentState?: string;
+    /** The dashboard's buyer sentence for `paymentState` (plain text), present only with it and only when non-empty. */
+    paymentMessage?: string;
 }
 
 /**
@@ -195,6 +203,8 @@ interface GetOrderForThankYouOptions {
     signal?: AbortSignal;
     /** Keep the ownership token after a terminal status (the pay pop-up navigates to the thank-you page, which still needs it). Default false. */
     keepToken?: boolean;
+    /** The page language (`en`, `he`, ...). Sent as `&locale=` so the dashboard writes `paymentMessage` in it; omitted, the order's own language is used. */
+    locale?: string;
 }
 /**
  * Reads the order for the thank-you page. With a stored ownership token the full shape comes back;
@@ -210,6 +220,8 @@ interface UseThankYouOrderOptions {
     apiBaseUrl: string;
     /** Fires once on a terminal PAID status: clear the cart and the pending coupon here. */
     onPaid?: (order: OrderThin | OrderFull) => void;
+    /** The page language; sent so the dashboard's `paymentMessage` is written in it. */
+    locale?: string;
 }
 type UseThankYouOrderResult = {
     status: 'confirming';

@@ -57,6 +57,16 @@ export interface GetOrderForThankYouOptions {
   signal?: AbortSignal;
   /** Keep the ownership token after a terminal status (the pay pop-up navigates to the thank-you page, which still needs it). Default false. */
   keepToken?: boolean;
+  /** The page language (`en`, `he`, ...). Sent as `&locale=` so the dashboard writes `paymentMessage` in it; omitted, the order's own language is used. */
+  locale?: string;
+}
+
+/** The two payment fields of the latest answer, only when the dashboard sent a non-null `paymentState`; otherwise nothing (the result keeps today's shape). */
+function paymentFields(order: OrderThin | OrderFull | null): { paymentState?: string; paymentMessage?: string } {
+  if (!order || typeof order.paymentState !== 'string' || !order.paymentState) return {};
+  return typeof order.paymentMessage === 'string' && order.paymentMessage
+    ? { paymentState: order.paymentState, paymentMessage: order.paymentMessage }
+    : { paymentState: order.paymentState };
 }
 
 /** A site callback that throws must never stop the result from returning. */
@@ -82,7 +92,7 @@ export async function getOrderForThankYou(orderId: string, opts: GetOrderForThan
   const base = opts.apiBaseUrl.replace(/\/+$/, '');
   const token = readOwnershipToken(orderId);
   // The token travels in a header and never in a URL.
-  const url = `${base}/api/public/orders/${encodeURIComponent(orderId)}?domain=${encodeURIComponent(opts.domain)}`;
+  const url = `${base}/api/public/orders/${encodeURIComponent(orderId)}?domain=${encodeURIComponent(opts.domain)}${opts.locale ? `&locale=${encodeURIComponent(opts.locale)}` : ''}`;
   const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
   // Inside a same-origin frame (the pay pop-up's iframe landing on the thank-you page) the token stays in the shared
@@ -109,7 +119,7 @@ export async function getOrderForThankYou(orderId: string, opts: GetOrderForThan
     if (opts.signal?.aborted) break;
 
     if (res) {
-      if (res.status === 429) return { state: 'not_received', order: last, full, requests };
+      if (res.status === 429) return { state: 'not_received', order: last, full, requests, ...paymentFields(last) };
       if (res.status === 404) return { state: 'not_found', order: null, full: false, requests };
       if (res.ok) {
         let json: (OrderThin | OrderFull) | null = null;
@@ -126,12 +136,12 @@ export async function getOrderForThankYou(orderId: string, opts: GetOrderForThan
           if (state) {
             if (!opts.keepToken && !framed) clearOwnershipToken(orderId);
             if (state === 'paid' && !framed) safely(() => opts.onPaid?.(json!));
-            return { state, order: json, full, requests };
+            return { state, order: json, full, requests, ...(state === 'declined' ? paymentFields(json) : {}) };
           }
           safely(() => opts.onUpdate?.(json!));
         }
       }
     }
   }
-  return { state: 'not_received', order: last, full, requests };
+  return { state: 'not_received', order: last, full, requests, ...paymentFields(last) };
 }
