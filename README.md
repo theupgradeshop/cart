@@ -402,6 +402,51 @@ const r = await startCheckout({ door: 'cart', domain, apiBaseUrl, customer, item
 - `useLinkCoupon` follows the template's link-coupon recipe but does NOT clear the pending code after an
   auto-apply (a cancel-return re-applies it); the site clears it on remove, a manual apply and a paid thank-you.
 
+## Tracking (`@upgradeshop/cart/tracking`)
+
+Meta pixel conversion events for template-family sites (customer-websites-278d, v1.4.0). Plain
+browser code: no React, no `'use client'`. It does not load the pixel; the site's own loader does,
+only after consent. Every function returns `Promise<boolean>`: `true` only when `fbq` was actually
+called, `false` for every drop (guard, no consent, no `fbq`, timeout, a failed rule, already sent).
+
+- `configureTracking({ hasConsent })`: each site calls it once with its own `hasAnalyticsConsent`
+  (the cookie-consent provider does it). **Fail closed:** until it is called nothing is ever sent.
+- `trackPurchase(order)`: `order` is `TrackableOrder`: `orderId`, `financialStatus`, `total`,
+  `currency`, `paidAt`, `items[].productId`. Both `OrderThin` and a site's own order type fit.
+- `trackLead(submissionId)`: a Lead only with the dashboard's stored submission id.
+- `trackCompleteRegistration(key, memberId?)`: `key` is the once-per-browser key, e.g.
+  `reg_course_<courseSlug>` or `reg_hub`.
+
+```ts
+configureTracking({ hasConsent: hasAnalyticsConsent });                 // once, in the consent provider
+void trackPurchase({ orderId, financialStatus, total, currency, paidAt, items });  // order reached paid
+void trackLead(result.submissionId);                                    // after /api/contact returned an id
+void trackCompleteRegistration(`reg_course_${courseSlug}`, memberId);   // sign-up form accepted
+```
+
+**Rules (all enforced inside the module, so a call site is one line):**
+
+- **Guard:** nothing inside a frame (`window.self !== window.top`) and nothing on a `/preview*` path.
+- **Wait:** up to 10 s, polling until `hasConsent() && typeof window.fbq === "function"`. Past 10 s
+  the event is dropped; nothing is queued or replayed across a reload.
+- **Consent is re-read at send time**, right before `fbq` is called. Withdrawn during the wait: dropped.
+- **Marked only after `fbq` ran.** A dropped event marks nothing, so a later page load can still send
+  it (a buyer who accepts on a reload-on-accept site's thank-you page is recovered this way).
+- **Once per key per browser:** fired keys live in localStorage `tus:tracking:fired` (last 200 kept).
+  Another browser or cleared storage can send the same key again.
+- **Purchase only when** `financialStatus === "paid"`, `total` is a finite number `> 0`, `currency` is
+  a 3-letter code (sent upper-case, from the order, never a site default), and `paidAt` is present and
+  at most 24 h old (a `paidAt` up to 10 min in the future counts as age 0; null fails closed).
+  `value` = `total`. `content_ids` and `contents` come only from items with a non-null `productId`
+  (quantity defaults to 1); with none, both are omitted. No `num_items`. Free orders and trials send nothing.
+- **eventIDs:** Purchase `purchase_<orderId>`, Lead `lead_<submissionId>`, CompleteRegistration
+  `reg_<memberId>` only when a `memberId` is passed (otherwise none; never a random id). Purchase and
+  Lead use the same string as their fired key. Lead and CompleteRegistration send no value or currency.
+- An empty `orderId`, `submissionId` or `key` sends nothing.
+
+The 24 h gate narrows a re-count from another browser; it does not close it. Owner-facing behaviour,
+per-site call points and gaps: `wiki/customer-websites/meta-pixel-conversion-events.md`.
+
 ## Development
 
 ```bash
