@@ -48,4 +48,14 @@ export default defineConfig([
     clean: false,
     external: ['react', 'react-dom', 'next'],
   },
+  {
+    // Meta pixel conversion events: plain browser code (touches window only when called), NO 'use client'
+    // banner and no React import, so a Server Component file may import it harmlessly.
+    entry: ['src/tracking/index.ts'],
+    outDir: 'dist/tracking',
+    format: ['cjs', 'esm'],
+    dts: true,
+    clean: false,
+    external: ['react', 'react-dom', 'next'],
+  },
 ]);
