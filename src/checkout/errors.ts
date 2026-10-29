@@ -13,6 +13,8 @@ const KNOWN: ReadonlySet<string> = new Set<CheckoutErrorKey>([
   'cohort_identity_registered',
   'coupon_limit_reached',
   'coupon_invalid',
+  'coupon_not_combinable',
+  'too_many_coupons',
   'product_unavailable',
   'subscription_unavailable',
   'invalid_return_url',
@@ -40,6 +42,12 @@ export function isCheckoutError(e: unknown): e is CheckoutError {
   return typeof e === 'object' && e !== null && (e as Record<symbol, unknown>)[BRAND] === true;
 }
 
+export interface CheckoutCouponRefusal {
+  couponCode?: string;
+  conflictsWith?: string[];
+  coupons?: Array<{ code: string; discount: number }>;
+}
+
 export class CheckoutError extends Error {
   readonly [BRAND] = true;
   readonly key: CheckoutErrorKey;
@@ -47,9 +55,19 @@ export class CheckoutError extends Error {
   /** `product_unavailable` only: the slugs of the failing products, so the cart can mark the line. */
   readonly items?: string[];
 
-  constructor(key: CheckoutErrorKey, status: number, items?: string[]) {
+  /** Coupon refusals (`coupon_not_combinable`, `too_many_coupons`, `coupon_invalid`, `coupon_limit_reached`): the code the server refused. */
+  readonly couponCode?: string;
+  /** Coupon refusals: the applied codes the refused one clashes with. */
+  readonly conflictsWith?: string[];
+  /** Coupon refusals: the codes the server kept applied (typed before the refused one), with their shares. Never the server's sentence. */
+  readonly coupons?: Array<{ code: string; discount: number }>;
+
+  constructor(key: CheckoutErrorKey, status: number, items?: string[], coupon?: CheckoutCouponRefusal) {
     super(key);
     if (items) this.items = items;
+    if (coupon?.couponCode !== undefined) this.couponCode = coupon.couponCode;
+    if (coupon?.conflictsWith !== undefined) this.conflictsWith = coupon.conflictsWith;
+    if (coupon?.coupons !== undefined) this.coupons = coupon.coupons;
     this.name = 'CheckoutError';
     this.key = key;
     this.status = status;

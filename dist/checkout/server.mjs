@@ -44,6 +44,9 @@ function compact(obj) {
   for (const [k, v] of Object.entries(obj)) if (v !== void 0) out[k] = v;
   return out;
 }
+function manyCodes(codes) {
+  return Array.isArray(codes) && codes.length >= 2 ? codes : void 0;
+}
 function buildCartDoorBody(input) {
   const n = input.selectedInstallments;
   return compact({
@@ -52,6 +55,7 @@ function buildCartDoorBody(input) {
     customer: compact({ ...input.customer }),
     items: input.items.map((i) => compact({ ...i })),
     couponCode: input.couponCode,
+    couponCodes: manyCodes(input.couponCodes),
     language: input.language,
     marketingConsent: input.marketingConsent,
     shipping_address: input.shippingAddress,
@@ -68,6 +72,7 @@ function buildFunnelDoorBody(input) {
     name: input.name,
     phone: input.phone,
     couponCode: input.couponCode,
+    couponCodes: manyCodes(input.couponCodes),
     shipping_address: input.shippingAddress,
     utms: input.utms,
     session_id: input.sessionId,
@@ -91,6 +96,8 @@ var KNOWN = /* @__PURE__ */ new Set([
   "cohort_identity_registered",
   "coupon_limit_reached",
   "coupon_invalid",
+  "coupon_not_combinable",
+  "too_many_coupons",
   "product_unavailable",
   "subscription_unavailable",
   "invalid_return_url",
@@ -106,10 +113,13 @@ function isCheckoutError(e) {
 }
 var _a, _b;
 var CheckoutError = class extends (_b = Error, _a = BRAND, _b) {
-  constructor(key, status, items) {
+  constructor(key, status, items, coupon) {
     super(key);
     this[_a] = true;
     if (items) this.items = items;
+    if (coupon?.couponCode !== void 0) this.couponCode = coupon.couponCode;
+    if (coupon?.conflictsWith !== void 0) this.conflictsWith = coupon.conflictsWith;
+    if (coupon?.coupons !== void 0) this.coupons = coupon.coupons;
     this.name = "CheckoutError";
     this.key = key;
     this.status = status;

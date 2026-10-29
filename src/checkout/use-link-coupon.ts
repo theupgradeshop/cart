@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { buildCouponValidateBody, parseCouponValidation } from './coupon-validation';
 
 export interface LinkCouponLine {
   slug: string;
@@ -59,9 +60,10 @@ export function useLinkCoupon(o: UseLinkCouponOptions): void {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             domain: o.domain,
-            code: pending.code,
-            items: o.lines.map((l) => ({ productSlug: l.slug, quantity: l.quantity ?? 1, price: l.price })),
-            subtotal: o.subtotal,
+            ...buildCouponValidateBody([pending.code], {
+              items: o.lines.map((l) => ({ productSlug: l.slug, quantity: l.quantity ?? 1, price: l.price })),
+              subtotal: o.subtotal,
+            }),
           }),
         });
         const data = await res.json();
@@ -69,8 +71,9 @@ export function useLinkCoupon(o: UseLinkCouponOptions): void {
         delivered = true;
         const now = latest.current;
         if (now.appliedCode || now.hasTypedText || !now.collecting) return;
-        if (data?.valid && typeof data.discount?.amount === 'number' && typeof data.coupon?.code === 'string') {
-          now.onApply({ code: data.coupon.code, discountAmount: data.discount.amount });
+        const parsed = parseCouponValidation(typeof res.status === 'number' ? res.status : 200, data, [pending.code]);
+        if (parsed.kind === 'ok') {
+          now.onApply({ code: parsed.applied.coupons[0].code, discountAmount: parsed.applied.total });
         }
       } catch {
         /* keep pending, show nothing */

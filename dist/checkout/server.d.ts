@@ -31,7 +31,11 @@ interface CheckoutV2Response {
     funnelNextUrl?: string | null;
 }
 /** Stable keys the site maps to its own words. The package never renders them. */
-type CheckoutErrorKey = 'generic' | 'invalid_request' | 'order_not_found' | 'module_disabled' | 'gateway_not_configured' | 'unsupported_provider' | 'prerequisite_missing' | 'cohort_unavailable' | 'cohort_dates_unavailable' | 'cohort_identity_registered' | 'coupon_limit_reached' | 'coupon_invalid' | 'product_unavailable' | 'subscription_unavailable' | 'invalid_return_url' | 'payment_unavailable' | 'upsell_unavailable' | 'installments_unavailable'
+type CheckoutErrorKey = 'generic' | 'invalid_request' | 'order_not_found' | 'module_disabled' | 'gateway_not_configured' | 'unsupported_provider' | 'prerequisite_missing' | 'cohort_unavailable' | 'cohort_dates_unavailable' | 'cohort_identity_registered' | 'coupon_limit_reached' | 'coupon_invalid'
+/** DC13: the new code cannot be combined with the codes already applied (the error also carries `couponCode`, `conflictsWith`, `coupons`). */
+ | 'coupon_not_combinable'
+/** DC13: more codes than one order may carry (5). */
+ | 'too_many_coupons' | 'product_unavailable' | 'subscription_unavailable' | 'invalid_return_url' | 'payment_unavailable' | 'upsell_unavailable' | 'installments_unavailable'
 /** A physical order without a usable shipping address (dashboard follow-up, not yet emitted). */
  | 'shipping_address_required'
 /** HTTP 429 from the door. */
@@ -58,7 +62,10 @@ interface StartCheckoutShared {
     domain: string;
     /** Dashboard base URL (the site's NEXT_PUBLIC_PLATFORM_URL). Required: this is the money path, nothing is assumed. */
     apiBaseUrl: string;
+    /** With several codes this is the FIRST applied code (a pre-DC13 dashboard applies only it). */
     couponCode?: string;
+    /** DC13: every applied code, in applied order. Sent ONLY for 2 or more codes (one code keeps today's body); `couponCode` stays the first. */
+    couponCodes?: string[];
     shippingAddress?: Record<string, unknown>;
     /**
      * Absolute https URL on the site's own origin. It must name the same page as `thankYouPath`:
@@ -211,6 +218,7 @@ declare function buildCartDoorBody(input: StartCartCheckoutInput): {
         addonProductIds?: string[];
     }[];
     couponCode: string | undefined;
+    couponCodes: string[] | undefined;
     language: string | undefined;
     marketingConsent: boolean | undefined;
     shipping_address: Record<string, unknown> | undefined;
@@ -226,6 +234,7 @@ declare function buildFunnelDoorBody(input: StartFunnelCheckoutInput): {
     name: string | undefined;
     phone: string | undefined;
     couponCode: string | undefined;
+    couponCodes: string[] | undefined;
     shipping_address: Record<string, unknown> | undefined;
     utms: Record<string, string> | undefined;
     session_id: string | undefined;
@@ -247,13 +256,30 @@ declare const BRAND: unique symbol;
  * bundle their own copy of the class, so `instanceof` can disagree across them; this does not.
  */
 declare function isCheckoutError(e: unknown): e is CheckoutError;
+interface CheckoutCouponRefusal {
+    couponCode?: string;
+    conflictsWith?: string[];
+    coupons?: Array<{
+        code: string;
+        discount: number;
+    }>;
+}
 declare class CheckoutError extends Error {
     readonly [BRAND] = true;
     readonly key: CheckoutErrorKey;
     readonly status: number;
     /** `product_unavailable` only: the slugs of the failing products, so the cart can mark the line. */
     readonly items?: string[];
-    constructor(key: CheckoutErrorKey, status: number, items?: string[]);
+    /** Coupon refusals (`coupon_not_combinable`, `too_many_coupons`, `coupon_invalid`, `coupon_limit_reached`): the code the server refused. */
+    readonly couponCode?: string;
+    /** Coupon refusals: the applied codes the refused one clashes with. */
+    readonly conflictsWith?: string[];
+    /** Coupon refusals: the codes the server kept applied (typed before the refused one), with their shares. Never the server's sentence. */
+    readonly coupons?: Array<{
+        code: string;
+        discount: number;
+    }>;
+    constructor(key: CheckoutErrorKey, status: number, items?: string[], coupon?: CheckoutCouponRefusal);
 }
 /** Maps an error body `{ code }` and the HTTP status to a stable key. Unknown codes are `generic`. */
 declare function checkoutErrorKey(status: number, code: unknown): CheckoutErrorKey;

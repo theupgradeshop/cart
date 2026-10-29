@@ -23,15 +23,18 @@ var index_exports = {};
 __export(index_exports, {
   CHECKOUT_ERROR_KEYS: () => CHECKOUT_ERROR_KEYS,
   CheckoutError: () => CheckoutError,
+  MAX_COUPON_CODES: () => MAX_COUPON_CODES,
   POLL_INTERVAL_MS: () => POLL_INTERVAL_MS,
   POLL_MAX_REQUESTS: () => POLL_MAX_REQUESTS,
   TERMINAL_FINANCIAL_STATUSES: () => TERMINAL_FINANCIAL_STATUSES,
   buildCartDoorBody: () => buildCartDoorBody,
+  buildCouponValidateBody: () => buildCouponValidateBody,
   buildFunnelDoorBody: () => buildFunnelDoorBody,
   checkoutErrorKey: () => checkoutErrorKey,
   getOrderForThankYou: () => getOrderForThankYou,
   isCheckoutError: () => isCheckoutError,
   maxInstallmentsFor: () => maxInstallmentsFor,
+  parseCouponValidation: () => parseCouponValidation,
   startCheckout: () => startCheckout,
   useLinkCoupon: () => useLinkCoupon,
   useThankYouOrder: () => useThankYouOrder
@@ -39,10 +42,13 @@ __export(index_exports, {
 module.exports = __toCommonJS(index_exports);
 
 // src/checkout/bodies.ts
-function compact(obj) {
+function compact(obj2) {
   const out = {};
-  for (const [k, v] of Object.entries(obj)) if (v !== void 0) out[k] = v;
+  for (const [k, v] of Object.entries(obj2)) if (v !== void 0) out[k] = v;
   return out;
+}
+function manyCodes(codes) {
+  return Array.isArray(codes) && codes.length >= 2 ? codes : void 0;
 }
 function buildCartDoorBody(input) {
   const n = input.selectedInstallments;
@@ -52,6 +58,7 @@ function buildCartDoorBody(input) {
     customer: compact({ ...input.customer }),
     items: input.items.map((i) => compact({ ...i })),
     couponCode: input.couponCode,
+    couponCodes: manyCodes(input.couponCodes),
     language: input.language,
     marketingConsent: input.marketingConsent,
     shipping_address: input.shippingAddress,
@@ -68,6 +75,7 @@ function buildFunnelDoorBody(input) {
     name: input.name,
     phone: input.phone,
     couponCode: input.couponCode,
+    couponCodes: manyCodes(input.couponCodes),
     shipping_address: input.shippingAddress,
     utms: input.utms,
     session_id: input.sessionId,
@@ -91,6 +99,8 @@ var KNOWN = /* @__PURE__ */ new Set([
   "cohort_identity_registered",
   "coupon_limit_reached",
   "coupon_invalid",
+  "coupon_not_combinable",
+  "too_many_coupons",
   "product_unavailable",
   "subscription_unavailable",
   "invalid_return_url",
@@ -106,10 +116,13 @@ function isCheckoutError(e) {
 }
 var _a, _b;
 var CheckoutError = class extends (_b = Error, _a = BRAND, _b) {
-  constructor(key, status, items) {
+  constructor(key, status, items, coupon) {
     super(key);
     this[_a] = true;
     if (items) this.items = items;
+    if (coupon?.couponCode !== void 0) this.couponCode = coupon.couponCode;
+    if (coupon?.conflictsWith !== void 0) this.conflictsWith = coupon.conflictsWith;
+    if (coupon?.coupons !== void 0) this.coupons = coupon.coupons;
     this.name = "CheckoutError";
     this.key = key;
     this.status = status;
@@ -213,6 +226,17 @@ function parseV2Response(x) {
 }
 
 // src/checkout/start-checkout.ts
+var COUPON_KEYS = /* @__PURE__ */ new Set(["coupon_not_combinable", "too_many_coupons", "coupon_invalid", "coupon_limit_reached"]);
+function couponRefusal(json) {
+  const b = json && typeof json === "object" ? json : {};
+  const out = {};
+  if (typeof b.couponCode === "string") out.couponCode = b.couponCode;
+  if (Array.isArray(b.conflictsWith)) out.conflictsWith = b.conflictsWith.filter((c) => typeof c === "string");
+  if (Array.isArray(b.coupons)) {
+    out.coupons = b.coupons.filter((c) => !!c && typeof c.code === "string" && typeof c.discount === "number" && Number.isFinite(c.discount)).map((c) => ({ code: c.code, discount: c.discount }));
+  }
+  return out;
+}
 function thankYouUrl(thankYouPath, orderId) {
   const hash = thankYouPath.indexOf("#");
   const path = hash === -1 ? thankYouPath : thankYouPath.slice(0, hash);
@@ -243,7 +267,7 @@ async function startCheckout(input) {
     const b = json && typeof json === "object" ? json : {};
     const key = checkoutErrorKey(res.status, b.code);
     const items = key === "product_unavailable" && Array.isArray(b.items) && b.items.every((i) => typeof i === "string") ? b.items : void 0;
-    throw new CheckoutError(key, res.status, items);
+    throw new CheckoutError(key, res.status, items, COUPON_KEYS.has(key) ? couponRefusal(json) : void 0);
   }
   const parsed = parseV2Response(json);
   if (!parsed) throw new CheckoutError("generic", res.status);
@@ -399,6 +423,68 @@ function useThankYouOrder(orderId, opts) {
 
 // src/checkout/use-link-coupon.ts
 var import_react2 = require("react");
+
+// src/checkout/coupon-validation.ts
+var MAX_COUPON_CODES = 5;
+function buildCouponValidateBody(codes, rest) {
+  const list = codes.filter((c) => typeof c === "string" && c.trim() !== "").slice(0, MAX_COUPON_CODES);
+  if (list.length <= 1) return { code: list[0] ?? codes[0] ?? "", ...rest };
+  return { code: list[0], codes: list, ...rest };
+}
+var UNREACHABLE = { kind: "unreachable" };
+function obj(v) {
+  return v && typeof v === "object" && !Array.isArray(v) ? v : null;
+}
+function num(v) {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+function coupons(list, flag) {
+  if (!Array.isArray(list)) return null;
+  const out = [];
+  for (const raw of list) {
+    const c = obj(raw);
+    const discount = c ? num(c.discount) : null;
+    if (!c || typeof c.code !== "string" || !c.code || discount === null) return null;
+    out.push({ code: c.code, discount, allowCombining: flag(c) });
+  }
+  return out;
+}
+function parseCouponValidation(status, json, sentCodes) {
+  if (!Number.isFinite(status) || status <= 0 || status >= 429) return UNREACHABLE;
+  const b = obj(json);
+  if (!b) return UNREACHABLE;
+  if (status >= 200 && status < 300 && b.valid === true) {
+    const total = num(obj(b.discount)?.amount);
+    if (total === null) return UNREACHABLE;
+    if (b.coupons !== void 0) {
+      const list = coupons(b.coupons, (c) => c.allowCombining === true);
+      if (!list || list.length === 0) return UNREACHABLE;
+      return { kind: "ok", applied: { coupons: list, total, freeShipping: b.allowFreeShipping === true } };
+    }
+    const coupon = obj(b.coupon);
+    if (!coupon || typeof coupon.code !== "string" || !coupon.code) return UNREACHABLE;
+    return {
+      kind: "ok",
+      applied: {
+        coupons: [{ code: coupon.code, discount: total, allowCombining: coupon.allowCombining === true }],
+        total,
+        freeShipping: coupon.allowFreeShipping === true
+      }
+    };
+  }
+  if (status >= 400 && status < 429 && b.valid !== true) {
+    const sent = new Set(sentCodes.map((c) => c.trim().toUpperCase()));
+    const out = { kind: "refused", keep: coupons(b.coupons, () => false) ?? [] };
+    if (typeof b.code === "string") out.errorCode = b.code;
+    if (typeof b.couponCode === "string" && sent.has(b.couponCode.trim().toUpperCase())) out.refusedCode = b.couponCode;
+    if (Array.isArray(b.conflictsWith)) out.conflictsWith = b.conflictsWith.filter((c) => typeof c === "string");
+    if (typeof b.error === "string") out.message = b.error;
+    return out;
+  }
+  return UNREACHABLE;
+}
+
+// src/checkout/use-link-coupon.ts
 function useLinkCoupon(o) {
   const tried = (0, import_react2.useRef)("");
   const latest = (0, import_react2.useRef)(o);
@@ -421,9 +507,10 @@ function useLinkCoupon(o) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             domain: o.domain,
-            code: pending.code,
-            items: o.lines.map((l) => ({ productSlug: l.slug, quantity: l.quantity ?? 1, price: l.price })),
-            subtotal: o.subtotal
+            ...buildCouponValidateBody([pending.code], {
+              items: o.lines.map((l) => ({ productSlug: l.slug, quantity: l.quantity ?? 1, price: l.price })),
+              subtotal: o.subtotal
+            })
           })
         });
         const data = await res.json();
@@ -431,8 +518,9 @@ function useLinkCoupon(o) {
         delivered = true;
         const now = latest.current;
         if (now.appliedCode || now.hasTypedText || !now.collecting) return;
-        if (data?.valid && typeof data.discount?.amount === "number" && typeof data.coupon?.code === "string") {
-          now.onApply({ code: data.coupon.code, discountAmount: data.discount.amount });
+        const parsed = parseCouponValidation(typeof res.status === "number" ? res.status : 200, data, [pending.code]);
+        if (parsed.kind === "ok") {
+          now.onApply({ code: parsed.applied.coupons[0].code, discountAmount: parsed.applied.total });
         }
       } catch {
       }
@@ -458,15 +546,18 @@ function maxInstallmentsFor(total, capabilities) {
 0 && (module.exports = {
   CHECKOUT_ERROR_KEYS,
   CheckoutError,
+  MAX_COUPON_CODES,
   POLL_INTERVAL_MS,
   POLL_MAX_REQUESTS,
   TERMINAL_FINANCIAL_STATUSES,
   buildCartDoorBody,
+  buildCouponValidateBody,
   buildFunnelDoorBody,
   checkoutErrorKey,
   getOrderForThankYou,
   isCheckoutError,
   maxInstallmentsFor,
+  parseCouponValidation,
   startCheckout,
   useLinkCoupon,
   useThankYouOrder

@@ -1,8 +1,25 @@
 import { buildCartDoorBody, buildFunnelDoorBody } from './bodies';
 import { CheckoutError, checkoutErrorKey } from './errors';
+import type { CheckoutCouponRefusal } from './errors';
 import { storeOwnershipToken } from './storage';
 import { parseV2Response } from './validate';
 import type { StartCheckoutInput, StartCheckoutResult } from './types';
+
+const COUPON_KEYS: ReadonlySet<string> = new Set(['coupon_not_combinable', 'too_many_coupons', 'coupon_invalid', 'coupon_limit_reached']);
+
+/** The coupon facts of a refusal body (codes and numbers only; the server's sentence is never carried). */
+function couponRefusal(json: unknown): CheckoutCouponRefusal {
+  const b = json && typeof json === 'object' ? (json as Record<string, unknown>) : {};
+  const out: CheckoutCouponRefusal = {};
+  if (typeof b.couponCode === 'string') out.couponCode = b.couponCode;
+  if (Array.isArray(b.conflictsWith)) out.conflictsWith = b.conflictsWith.filter((c): c is string => typeof c === 'string');
+  if (Array.isArray(b.coupons)) {
+    out.coupons = b.coupons
+      .filter((c): c is { code: string; discount: number } => !!c && typeof c.code === 'string' && typeof c.discount === 'number' && Number.isFinite(c.discount))
+      .map((c) => ({ code: c.code, discount: c.discount }));
+  }
+  return out;
+}
 
 /** Inserts `orderId` before any #fragment. */
 function thankYouUrl(thankYouPath: string, orderId: string): string {
@@ -49,7 +66,7 @@ export async function startCheckout(input: StartCheckoutInput): Promise<StartChe
       key === 'product_unavailable' && Array.isArray(b.items) && b.items.every((i) => typeof i === 'string')
         ? (b.items as string[])
         : undefined;
-    throw new CheckoutError(key, res.status, items);
+    throw new CheckoutError(key, res.status, items, COUPON_KEYS.has(key) ? couponRefusal(json) : undefined);
   }
   const parsed = parseV2Response(json);
   if (!parsed) throw new CheckoutError('generic', res.status);

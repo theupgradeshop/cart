@@ -93,6 +93,24 @@ describe('useLinkCoupon (D5 recipe)', () => {
     });
   });
 
+  it('request bytes are the single-code bytes (domain, code, items, subtotal in this order)', async () => {
+    const o = base();
+    renderHook(() => useLinkCoupon(o));
+    await waitFor(() => expect(f).toHaveBeenCalled());
+    expect(f.mock.calls[0][1].body).toBe(
+      '{"domain":"shop.test","code":"save10","items":[{"productSlug":"p","quantity":1,"price":100}],"subtotal":100}',
+    );
+  });
+
+  it.each([429, 500])('a %s answer applies nothing', async (status) => {
+    f.mockResolvedValue({ status, json: async () => ({ valid: false, error: 'x', code: 'RATE_LIMITED' }) });
+    const o = base();
+    renderHook(() => useLinkCoupon(o));
+    await waitFor(() => expect(f).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 10));
+    expect(o.onApply).not.toHaveBeenCalled();
+  });
+
   it('does not clear the pending code after an auto-apply: a cancel-return re-applies it', async () => {
     const pending = { code: 'save10' };
     const readPending = vi.fn(() => pending);

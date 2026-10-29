@@ -7,6 +7,11 @@ function compact<T extends Record<string, unknown>>(obj: T): T {
   return out as T;
 }
 
+/** `couponCodes` only for 2 or more codes: one code keeps today's body bytes. */
+function manyCodes(codes: string[] | undefined): string[] | undefined {
+  return Array.isArray(codes) && codes.length >= 2 ? codes : undefined;
+}
+
 /** POST body for the cart door (`/api/public/checkout`, contract 2). */
 export function buildCartDoorBody(input: StartCartCheckoutInput) {
   const n = input.selectedInstallments;
@@ -16,6 +21,7 @@ export function buildCartDoorBody(input: StartCartCheckoutInput) {
     customer: compact({ ...input.customer }),
     items: input.items.map((i) => compact({ ...i })),
     couponCode: input.couponCode,
+    couponCodes: manyCodes(input.couponCodes),
     language: input.language,
     marketingConsent: input.marketingConsent,
     shipping_address: input.shippingAddress,
@@ -34,6 +40,7 @@ export function buildFunnelDoorBody(input: StartFunnelCheckoutInput) {
     name: input.name,
     phone: input.phone,
     couponCode: input.couponCode,
+    couponCodes: manyCodes(input.couponCodes),
     shipping_address: input.shippingAddress,
     utms: input.utms,
     session_id: input.sessionId,

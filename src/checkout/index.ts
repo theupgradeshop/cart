@@ -17,12 +17,15 @@ export type { UseLinkCouponOptions, LinkCouponLine } from './use-link-coupon';
 // can never pull a 'use client' function into a Server Component.
 export { CheckoutError, checkoutErrorKey, isCheckoutError, CHECKOUT_ERROR_KEYS } from './errors';
 export { buildCartDoorBody, buildFunnelDoorBody } from './bodies';
+export { buildCouponValidateBody, parseCouponValidation, MAX_COUPON_CODES } from './coupon-validation';
+export type { CouponValidation } from './coupon-validation';
 export { maxInstallmentsFor } from './capabilities';
 export type {
   CheckoutTotals,
   CheckoutNext,
   CheckoutV2Response,
   CheckoutErrorKey,
+  AppliedCoupon,
   CheckoutCustomer,
   CartDoorItem,
   StartCartCheckoutInput,

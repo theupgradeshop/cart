@@ -405,6 +405,23 @@ const r = await startCheckout({ door: 'cart', domain, apiBaseUrl, customer, item
 - `useLinkCoupon` follows the template's link-coupon recipe but does NOT clear the pending code after an
   auto-apply (a cancel-return re-applies it); the site clears it on remove, a manual apply and a paid thank-you.
 
+### Several coupon codes (v1.5.0, DC13)
+
+- `couponCode` stays the first applied code. `couponCodes?: string[]` on both doors lists ALL applied codes in applied order and
+  is sent ONLY for 2 or more (one code keeps the exact body it always had; a pre-DC13 dashboard applies `couponCode`).
+- `startCheckout` refusals `coupon_not_combinable` and `too_many_coupons` (new `CheckoutErrorKey`s, also in `CHECKOUT_ERROR_KEYS`)
+  and the coupon keys `coupon_invalid` / `coupon_limit_reached` expose `error.couponCode?`, `error.conflictsWith?` and
+  `error.coupons?` (the codes the server kept, `{code, discount}`). The server's sentence is still not carried: word the key yourself.
+- `buildCouponValidateBody(codes, rest)` (pure, `./checkout`): one code gives `{ code, ...rest }`; 2 or more give
+  `{ code: codes[0], codes, ...rest }` (max 5, blanks dropped, new code LAST as given).
+- `parseCouponValidation(status, json, sentCodes)` (pure) reads the preview answer into
+  `{ kind: 'ok', applied: { coupons: [{code, discount, allowCombining}], total, freeShipping } }`,
+  `{ kind: 'refused', errorCode?, refusedCode?, conflictsWith?, message?, keep: [...] }` (`message` is the dashboard's sentence in
+  the buyer's language, shown as text; `keep` are the coupons the dashboard kept) or `{ kind: 'unreachable' }` (status 0, 429 and
+  above, non-JSON, or an answer off the contract: change nothing). The applied set is always the response's; a missing
+  `allowCombining` reads as false; `refusedCode` is set only when the response names a code that was sent.
+- `useLinkCoupon` uses both helpers internally; its options and `onApply` are unchanged.
+
 ## Tracking (`@upgradeshop/cart/tracking`)
 
 Meta pixel conversion events for template-family sites (customer-websites-278d, v1.4.0). Plain

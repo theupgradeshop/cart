@@ -42,6 +42,10 @@ export type CheckoutErrorKey =
   | 'cohort_identity_registered'
   | 'coupon_limit_reached'
   | 'coupon_invalid'
+  /** DC13: the new code cannot be combined with the codes already applied (the error also carries `couponCode`, `conflictsWith`, `coupons`). */
+  | 'coupon_not_combinable'
+  /** DC13: more codes than one order may carry (5). */
+  | 'too_many_coupons'
   | 'product_unavailable'
   | 'subscription_unavailable'
   | 'invalid_return_url'
@@ -54,6 +58,14 @@ export type CheckoutErrorKey =
   | 'rate_limited'
   /** The request never got an answer (offline, DNS, CORS). */
   | 'network';
+
+/** One coupon of an applied set, as the dashboard answered it: `discount` is the coupon's own share after the cap. */
+export interface AppliedCoupon {
+  code: string;
+  discount: number;
+  /** The owner's "can be combined" setting; a response without the flag reads as false. */
+  allowCombining: boolean;
+}
 
 export interface CheckoutCustomer {
   email: string;
@@ -77,7 +89,10 @@ interface StartCheckoutShared {
   domain: string;
   /** Dashboard base URL (the site's NEXT_PUBLIC_PLATFORM_URL). Required: this is the money path, nothing is assumed. */
   apiBaseUrl: string;
+  /** With several codes this is the FIRST applied code (a pre-DC13 dashboard applies only it). */
   couponCode?: string;
+  /** DC13: every applied code, in applied order. Sent ONLY for 2 or more codes (one code keeps today's body); `couponCode` stays the first. */
+  couponCodes?: string[];
   shippingAddress?: Record<string, unknown>;
   /**
    * Absolute https URL on the site's own origin. It must name the same page as `thankYouPath`:
