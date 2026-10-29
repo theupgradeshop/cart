@@ -207,6 +207,9 @@ export function useCartProducts(domain: string): {
             images: (live.images as CartProduct['images']) ?? [],
             status: 'active' as const,
             variants: live.variants as CartProduct['variants'],
+            // The catalog list returns snake_case names, the single-product fallback camelCase; one shape out.
+            product_type: ((live.product_type ?? live.productType) as string | null | undefined) ?? null,
+            contains_physical_product: (live.contains_physical_product ?? live.containsPhysicalProduct) === true,
             quantity: item.quantity,
             variantId: item.variantId,
           };

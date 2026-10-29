@@ -384,6 +384,9 @@ function useCartProducts(domain) {
           images: live.images ?? [],
           status: "active",
           variants: live.variants,
+          // The catalog list returns snake_case names, the single-product fallback camelCase; one shape out.
+          product_type: live.product_type ?? live.productType ?? null,
+          contains_physical_product: (live.contains_physical_product ?? live.containsPhysicalProduct) === true,
           quantity: item.quantity,
           variantId: item.variantId
         };

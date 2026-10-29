@@ -183,3 +183,51 @@ describe('useCartProducts', () => {
     expect(result.current.products.products[0].quantity).toBe(3);
   });
 });
+
+describe('useCartProducts: physical-product fields', () => {
+  it('passes product_type and contains_physical_product through from the catalog list', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        products: [
+          { slug: 'shirt', name: 'Shirt', price: 100, salePrice: null, images: [], status: 'active', variants: [], product_type: 'physical', contains_physical_product: false },
+          { slug: 'kit', name: 'Kit', price: 100, salePrice: null, images: [], status: 'active', variants: [], product_type: 'bundle', contains_physical_product: true },
+          { slug: 'guide', name: 'Guide', price: 100, salePrice: null, images: [], status: 'active', variants: [] },
+        ],
+      }),
+    } as Response);
+
+    const { result } = renderHook(
+      () => ({ cart: useCart(), products: useCartProducts('test-physical.com') }),
+      { wrapper: makeWrapper('test-physical') }
+    );
+    act(() => {
+      result.current.cart.addItem('shirt', 1);
+      result.current.cart.addItem('kit', 1);
+      result.current.cart.addItem('guide', 1);
+    });
+    await waitFor(() => expect(result.current.products.products).toHaveLength(3));
+
+    const bySlug = Object.fromEntries(result.current.products.products.map(p => [p.slug, p]));
+    expect(bySlug.shirt).toMatchObject({ product_type: 'physical', contains_physical_product: false });
+    expect(bySlug.kit).toMatchObject({ product_type: 'bundle', contains_physical_product: true });
+    expect(bySlug.guide).toMatchObject({ product_type: null, contains_physical_product: false });
+  });
+
+  it('reads the single-product fallback camelCase names into the same shape', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ products: [] }) } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ product: { slug: 'hidden', name: 'Hidden', price: 50, salePrice: null, images: [], variants: [], productType: 'physical', containsPhysicalProduct: true } }),
+      } as Response);
+
+    const { result } = renderHook(
+      () => ({ cart: useCart(), products: useCartProducts('test-physical-fallback.com') }),
+      { wrapper: makeWrapper('test-physical-fallback') }
+    );
+    act(() => { result.current.cart.addItem('hidden', 1); });
+    await waitFor(() => expect(result.current.products.products).toHaveLength(1));
+    expect(result.current.products.products[0]).toMatchObject({ product_type: 'physical', contains_physical_product: true });
+  });
+});

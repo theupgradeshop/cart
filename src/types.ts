@@ -39,6 +39,10 @@ export interface CartProduct {
   images: { url: string; alt: string }[];
   status: 'active' | 'unavailable'; // 'unavailable' = deleted/inactive in catalog
   variants?: ProductVariant[];
+  /** The product's type as the public products API returns it (e.g. 'physical', 'digital', 'bundle'); null when absent. */
+  product_type?: string | null;
+  /** True for a product (a bundle) that contains a physical item; false when the API says false or omits it. */
+  contains_physical_product?: boolean;
   quantity: number;           // Merged from CartItem
   variantId?: string;         // Merged from CartItem
 }

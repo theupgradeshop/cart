@@ -50,6 +50,9 @@ that already carries one.**
   `openCart`/`closeCart`/`toggleCart`, `itemCount`.
 - `useCartProducts(domain)` (`src/use-cart-products.ts`) — merges the cart's
   slugs with live product data from `GET /api/public/products`.
+  Each product also carries `product_type` and `contains_physical_product`
+  (v1.4.1; the list's snake_case names, the single-product fallback's camelCase
+  read into the same shape), so a site can decide on a shipping-address block.
 - `toComposedBundleCheckoutFragment(bundle)` (`src/composed-bundle.ts`) —
   see "Composed course bundle" below.
 - Bundle pricing engine (`src/bundle-engine.ts`) and `useBundleOffer`
