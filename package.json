@@ -1,6 +1,6 @@
 {
   "name": "@upgradeshop/cart",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "ID-only cart state management with live price fetching for Upgrade Shop customer websites",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -54,6 +54,26 @@
       "require": {
         "types": "./dist/tracking/index.d.ts",
         "default": "./dist/tracking/index.js"
+      }
+    },
+    "./site-gate": {
+      "import": {
+        "types": "./dist/site-gate/index.d.mts",
+        "default": "./dist/site-gate/index.mjs"
+      },
+      "require": {
+        "types": "./dist/site-gate/index.d.ts",
+        "default": "./dist/site-gate/index.js"
+      }
+    },
+    "./site-gate/client": {
+      "import": {
+        "types": "./dist/site-gate/client.d.mts",
+        "default": "./dist/site-gate/client.mjs"
+      },
+      "require": {
+        "types": "./dist/site-gate/client.d.ts",
+        "default": "./dist/site-gate/client.js"
       }
     }
   },

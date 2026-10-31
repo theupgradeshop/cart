@@ -58,4 +58,25 @@ export default defineConfig([
     clean: false,
     external: ['react', 'react-dom', 'next'],
   },
+  {
+    // Under-construction gate (server side): NO 'use client' banner, no React import. `next/server` stays external.
+    entry: ['src/site-gate/index.ts'],
+    outDir: 'dist/site-gate',
+    format: ['cjs', 'esm'],
+    dts: true,
+    clean: false,
+    external: ['react', 'react-dom', 'next'],
+  },
+  {
+    // Under-construction bar + pill (client side): 'use client'. Separate file so a middleware import never loads React.
+    entry: ['src/site-gate/client.tsx'],
+    outDir: 'dist/site-gate',
+    format: ['cjs', 'esm'],
+    dts: true,
+    clean: false,
+    external: ['react', 'react-dom', 'next'],
+    banner: {
+      js: "'use client';",
+    },
+  },
 ]);

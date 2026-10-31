@@ -500,6 +500,80 @@ void trackCompleteRegistration(`reg_course_${courseSlug}`, memberId);   // sign-
 The 24 h gate narrows a re-count from another browser; it does not close it. Owner-facing behaviour,
 per-site call points and gaps: `wiki/customer-websites/meta-pixel-conversion-events.md`.
 
+## Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.0)
+
+Spec: `knowledge/cowork/lead/plans/2026-10-31-websites-o-p-under-construction-and-sign-in-problems-SPEC.md` (D2-D5).
+The dashboard decides whether a site is "under construction"; this entry is the site-side gate that asks it and
+answers visitors with a 503 coming-soon page. It is a presentation and search signal over already-public content,
+**not access control**.
+
+Two entries (the server one must stay free of React and `'use client'`, a middleware imports it):
+
+- `@upgradeshop/cart/site-gate` (server, `next` is a peer): `siteGate(req, { domain, platformUrl, extraSkip?, fetchImpl? })`
+  -> `Promise<Response | null>`; `thankYouSkip(path | paths[], enabledLanguages)`; `isSiteGateSkipped(pathname)`;
+  types `SiteGateOptions`, `SiteGateAnswer`, `SiteGateView`, `SiteGateVariant`.
+  (`__resetSiteGateForTests`, `__siteGateCacheSizes` are test helpers.)
+- `@upgradeshop/cart/site-gate/client` (`'use client'`): `SiteGateBar`, `PreviewPill`.
+
+```ts
+// middleware.ts / proxy.ts: first thing in the handler (after a private-folder 404 where the site has one)
+const gated = await siteGate(req, {
+  domain: SITE_DOMAIN,
+  platformUrl: PLATFORM_URL,
+  extraSkip: thankYouSkip('/checkout/thank-you', ENABLED_LANGUAGES), // the site's OWN thank-you path
+});
+if (gated) return gated;
+```
+
+`null` means "not gated, carry on" (mode off, a skipped path, a cold start with the dashboard down, or any error
+inside: the body is wrapped). The handler therefore must be `async`.
+
+**Skipped, at segment boundaries only** (`/api` and `/api/x` yes, `/api-docs` no): `/api`, `/_next`, `/preview`,
+`/brand-icon`, `/d`, `/l`, `/robots.txt`, `/sitemap.xml`, any path whose LAST segment has a file extension
+(`/x/file.ext`; `/products/x.y/z` is gated), plus `extraSkip`. **`/site-coming-soon` is NOT skipped:** it is gated like any
+page (mode on: the visitor rewrite or the team view, always with clean request headers; mode off: a plain 404 `no-store`),
+so it never renders in public with the mode off and forged `x-tus-uc-*` headers never reach it.
+`/cart`, `/checkout`, `/login`, `/verify` stay gated. `thankYouSkip` matches the path (or any of several, e.g. add
+`/checkout-thank-you`), with or without a trailing slash, behind an optional language prefix (codes regex-escaped),
+and anything below it; `<path>-x` is gated.
+
+**Dashboard call:** `GET {platformUrl}/api/public/site-gate?domain=<domain>` with optional `x-tus-site-pass` /
+`x-tus-site-preview` headers, built from scratch (the incoming request's headers are never copied). Contract
+`{ on, view: 'visitor'|'team'|'preview', variant: 'centered'|'split'|'banner', businessName }`; `{ on: false }` is enough
+when off. Anything else (non-2xx, 429, timeout of 1 s, bad shape) = unreachable.
+
+**Cache:** one 5 s TTL keyed `(domain, sha256(token)|"")`. Tokenless answers: stale-while-revalidate, backoff,
+in-flight dedupe, last-known kept through any outage (held outside the LRU so a flood of tokens cannot evict it).
+Token answers: valid for one TTL only, bounded LRU (64), negative answers cached. Only a 2xx with a valid body writes.
+Unreachable -> tokenless: last-known, else open (one `console.error`, then at most one per 5 min); token-bearing: the
+visitor view, or open when the last tokenless answer was off. Tokens are shape-checked (base64url, max 1024 chars)
+before any forward, and token-bearing forwards are capped per process (5 burst, 5 per second); overflow = visitor view.
+
+**Responses**
+
+| Case | Response |
+|---|---|
+| visitor, mode on | `rewrite` to `/site-coming-soon`, status 503, `Retry-After: 3600`, `Cache-Control: no-store`; request headers `x-tus-uc-variant`, `x-tus-uc-business-name` (url-encoded) for the render route; no noindex |
+| valid `?tus_preview=<token>` | 302 to the same URL without the param, sets `__Host-tus_site_preview` (httpOnly, Secure, Lax, Path=/, session), `no-store`, `Referrer-Policy: no-referrer`. Invalid/turned-off: visitor 503, no cookie |
+| team (`__Host-tus_site_pass`, set by the site's `/api/site-pass`) or preview cookie | `NextResponse.next()` with `Cache-Control: private, no-store` and the readable cookie `tus_site_view=team\|preview` (30 s, refreshed on each gated request; expired by the gate when the mode is off) |
+| `?tus_view=visitor` | visitor view for a team member (narrows only; the token is not forwarded) |
+| mode off | `null` |
+
+A cookie is deleted only on a definitive 2xx "invalid" answer, never on a timeout, 429, 5xx, bad body or the
+last-known fallback. Incoming `x-tus-site-*` and `x-tus-uc-*` request headers are stripped on every response the
+gate builds (the `null` path cannot rewrite the request).
+
+**Render route contract:** `/site-coming-soon` reads the variant and the business name ONLY from the request headers the gate
+sets (`x-tus-uc-variant`, `x-tus-uc-business-name`), treats them as untrusted text, and wraps `decodeURIComponent` of the
+name in try/catch (empty name on failure). Cookie lifetimes: `__Host-tus_site_preview` session; `__Host-tus_site_pass` set by
+the site's route (pass expiry); `tus_site_view` 30 s. The 302 location takes its protocol from `x-forwarded-proto` (else `nextUrl`) and its host from
+`x-forwarded-host` / `host` ONLY when that equals `domain` (case-insensitive, port stripped); otherwise it is `domain` itself. A token answer is never served past 5 s: a failed refresh drops it.
+
+**Client:** `<SiteGateBar text visitorViewLabel settingsLabel settingsUrl />` (team: slim charcoal sticky bar, gold dot;
+"view as visitors" link = current URL + `tus_view=visitor`) and `<PreviewPill text />` (preview guests, bottom-start).
+Words come from the site. Both read `tus_site_view` after mount and render nothing on `/preview*` or inside an iframe.
+Inline styles with logical properties (RTL needs nothing).
+
 ## Development
 
 ```bash
