@@ -27,7 +27,7 @@ __export(index_exports, {
   thankYouSkip: () => thankYouSkip
 });
 module.exports = __toCommonJS(index_exports);
-var import_server = require("next/server");
+var import_server = require("next/server.js");
 
 // src/site-gate/shared.ts
 var PASS_COOKIE = "__Host-tus_site_pass";

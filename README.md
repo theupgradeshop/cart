@@ -500,7 +500,7 @@ void trackCompleteRegistration(`reg_course_${courseSlug}`, memberId);   // sign-
 The 24 h gate narrows a re-count from another browser; it does not close it. Owner-facing behaviour,
 per-site call points and gaps: `wiki/customer-websites/meta-pixel-conversion-events.md`.
 
-## Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.0)
+## Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.1)
 
 Spec: `knowledge/cowork/lead/plans/2026-10-31-websites-o-p-under-construction-and-sign-in-problems-SPEC.md` (D2-D5).
 The dashboard decides whether a site is "under construction"; this entry is the site-side gate that asks it and

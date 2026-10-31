@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+import { NextRequest } from 'next/server.js';
 
 type SiteGateView = 'visitor' | 'team' | 'preview';
 type SiteGateVariant = 'centered' | 'split' | 'banner';

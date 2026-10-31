@@ -1,11 +1,11 @@
-// Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.0; spec websites-o-p D5, council 2026-10-31).
+// Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.1; spec websites-o-p D5, council 2026-10-31).
 // Server-safe entry: NO 'use client', no React. Runs first in a site's middleware/proxy.
 //
 // siteGate(req, opts) -> Response | null.  null = "not gated, carry on" (mode off, skipped path, dashboard
 // unreachable on a cold start, or ANY error inside: the whole body is wrapped, a bug here never takes a site down).
 //
 // UC mode is a presentation/search signal over already-public content, NOT access control.
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server.js';
 import {
   PASS_COOKIE,
   PREVIEW_COOKIE,

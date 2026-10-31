@@ -1,5 +1,5 @@
 // src/site-gate/index.ts
-import { NextResponse } from "next/server";
+import { NextResponse } from "next/server.js";
 
 // src/site-gate/shared.ts
 var PASS_COOKIE = "__Host-tus_site_pass";
