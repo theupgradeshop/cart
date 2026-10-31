@@ -424,16 +424,24 @@ const r = await startCheckout({ door: 'cart', domain, apiBaseUrl, customer, item
 
 ## Tracking (`@upgradeshop/cart/tracking`)
 
-Meta pixel conversion events for template-family sites (customer-websites-278d, v1.4.0). Plain
+Meta pixel conversion events for template-family sites (customer-websites-278d, v1.4.0; form kind, `content_type` and late consent in v1.6.0, customer-websites-d924). Plain
 browser code: no React, no `'use client'`. It does not load the pixel; the site's own loader does,
 only after consent. Every function returns `Promise<boolean>`: `true` only when `fbq` was actually
-called, `false` for every drop (guard, no consent, no `fbq`, timeout, a failed rule, already sent).
+called, `false` for every drop (guard, declined, no consent within the hour, no `fbq`, a failed rule, already sent).
 
-- `configureTracking({ hasConsent })`: each site calls it once with its own `hasAnalyticsConsent`
-  (the cookie-consent provider does it). **Fail closed:** until it is called nothing is ever sent.
+- `configureTracking({ hasConsent, hasDeclined? })`: each site calls it once with its own
+  `hasAnalyticsConsent` (the cookie-consent provider does it). `hasDeclined` is optional: true when
+  the visitor explicitly declined (a stored `"declined"`), as opposed to "not answered yet".
+  **Fail closed:** until it is called nothing is ever sent. It also re-sends the events a previous
+  page of this tab carried across a reload (see `persistPendingTracking`).
+- `persistPendingTracking(): void`: call in every consent accept handler that reloads the page,
+  after the consent value is saved and just before `window.location.reload()`. It never throws.
 - `trackPurchase(order)`: `order` is `TrackableOrder`: `orderId`, `financialStatus`, `total`,
   `currency`, `paidAt`, `items[].productId`. Both `OrderThin` and a site's own order type fit.
-- `trackLead(submissionId)`: a Lead only with the dashboard's stored submission id.
+- `trackLead(submissionId, formKind?)`: a Lead only with the dashboard's stored submission id.
+  `formKind` is `LeadFormKind` = `'contact' | 'newsletter' | 'waitlist' | 'popup' | 'lesson' |
+  'product'`, sent as Meta's predefined `content_category`. A missing or unknown kind sends `{}` (as
+  before); a one-argument call is unchanged.
 - `trackCompleteRegistration(key, memberId?)`: `key` is the once-per-browser key, e.g.
   `reg_course_<courseSlug>` or `reg_hub`.
 
@@ -447,8 +455,24 @@ void trackCompleteRegistration(`reg_course_${courseSlug}`, memberId);   // sign-
 **Rules (all enforced inside the module, so a call site is one line):**
 
 - **Guard:** nothing inside a frame (`window.self !== window.top`) and nothing on a `/preview*` path.
-- **Wait:** up to 10 s, polling until `hasConsent() && typeof window.fbq === "function"`. Past 10 s
-  the event is dropped; nothing is queued or replayed across a reload.
+- **Declined:** an event created while `hasDeclined()` is true returns `false` at once and is never queued.
+- **Wait (late consent):** otherwise the event waits up to **1 hour from its creation** until
+  `hasConsent() && typeof window.fbq === "function"`, polling every 250 ms for the first 10 s and every
+  2 s after. Past 1 hour it is dropped, unmarked. Waiting events sit in a module-level list built
+  after the guard and the fired/in-flight checks (so a framed, `/preview` or already-fired event is never
+  queued), at most **20**; the oldest is dropped (and stops waiting) when a 21st arrives. An event leaves
+  the list when sent, refused or expired.
+- **Across the accept reload:** `persistPendingTracking()` writes the waiting list to **sessionStorage**
+  `tus:tracking:pending` (tab-scoped), a JSON array of `{ key, event, params, eventId, createdAt }`, only
+  when `hasConsent()` is true and the list is not empty. **Nothing about a conversion is stored before the
+  visitor has accepted.** `configureTracking()` reads it, drops malformed entries (event not one of
+  Purchase / Lead / CompleteRegistration, params not an object, empty key, eventId not a string or null,
+  createdAt not a finite number) and entries 1 h or older, and re-sends the rest through the same path
+  (guard, consent at send time, fired-key and in-flight dedup; Purchase rules were checked at creation).
+  An entry stays in sessionStorage until its send completes (sent or refused), so a second navigation
+  before the pixel loads does not lose it; calling `configureTracking` twice does not double-send.
+  Not covered: leaving or reloading before accepting, accepting in another tab. Purchase still recovers
+  by reopening the thank-you page within 24 h of `paidAt`.
 - **Consent is re-read at send time**, right before `fbq` is called. Withdrawn during the wait: dropped.
 - **Marked only after `fbq` ran.** A dropped event marks nothing, so a later page load can still send
   it (a buyer who accepts on a reload-on-accept site's thank-you page is recovered this way).
@@ -458,7 +482,8 @@ void trackCompleteRegistration(`reg_course_${courseSlug}`, memberId);   // sign-
   a 3-letter code (sent upper-case, from the order, never a site default), and `paidAt` is present and
   at most 24 h old (a `paidAt` up to 10 min in the future counts as age 0; null fails closed).
   `value` = `total`. `content_ids` and `contents` come only from items with a non-null `productId`
-  (quantity defaults to 1); with none, both are omitted. No `num_items`. Free orders and trials send nothing.
+  (quantity defaults to 1); with none, both are omitted. `content_type: 'product'` is sent exactly when
+  `content_ids` is. No `num_items`. Free orders and trials send nothing.
 - **eventIDs:** Purchase `purchase_<orderId>`, Lead `lead_<submissionId>`, CompleteRegistration
   `reg_<memberId>` only when a `memberId` is passed (otherwise none; never a random id). Purchase and
   Lead use the same string as their fired key. Lead and CompleteRegistration send no value or currency.

@@ -1,20 +1,36 @@
 // src/tracking/index.ts
-var WAIT_MS = 1e4;
-var POLL_MS = 250;
+var WAIT_MAX_MS = 60 * 60 * 1e3;
+var FAST_POLL_MS = 250;
+var FAST_POLL_WINDOW_MS = 1e4;
+var SLOW_POLL_MS = 2e3;
+var PENDING_KEY = "tus:tracking:pending";
+var PENDING_CAP = 20;
+var LEAD_FORM_KINDS = ["contact", "newsletter", "waitlist", "popup", "lesson", "product"];
+var EVENT_NAMES = ["Purchase", "Lead", "CompleteRegistration"];
 var MAX_PAID_AGE_MS = 24 * 60 * 60 * 1e3;
 var MAX_FUTURE_SKEW_MS = 10 * 60 * 1e3;
 var STORE_KEY = "tus:tracking:fired";
 var STORE_CAP = 200;
 var CURRENCY_RE = /^[A-Za-z]{3}$/;
 var config = null;
-var inFlight = /* @__PURE__ */ new Set();
+var inFlight = /* @__PURE__ */ new Map();
+var pending = [];
 function configureTracking(next) {
   config = next;
+  flushStoredPending();
 }
 function consent() {
   if (!config) return false;
   try {
     return config.hasConsent() === true;
+  } catch {
+    return false;
+  }
+}
+function declined() {
+  if (!config || typeof config.hasDeclined !== "function") return false;
+  try {
+    return config.hasDeclined() === true;
   } catch {
     return false;
   }
@@ -54,16 +70,64 @@ function fbqReady() {
   return typeof window.fbq === "function";
 }
 var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-async function send(key, eventName, params, eventId) {
-  if (blockedByGuard()) return false;
-  if (inFlight.has(key) || alreadyFired(key)) return false;
-  inFlight.add(key);
+function readStoredPending() {
   try {
-    const startedAt = Date.now();
+    const raw = window.sessionStorage.getItem(PENDING_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+function writeStoredPending(items) {
+  try {
+    if (items.length === 0) window.sessionStorage.removeItem(PENDING_KEY);
+    else window.sessionStorage.setItem(PENDING_KEY, JSON.stringify(items));
+  } catch {
+  }
+}
+function removeStoredPending(key) {
+  if (typeof window === "undefined") return;
+  const items = readStoredPending();
+  const kept = items.filter((i) => !(i && typeof i === "object" && i.key === key));
+  if (kept.length !== items.length) writeStoredPending(kept);
+}
+function leavePending(entry) {
+  const i = pending.indexOf(entry);
+  if (i >= 0) pending.splice(i, 1);
+  if (inFlight.get(entry.key) === entry) inFlight.delete(entry.key);
+}
+async function send(key, eventName, params, eventId, createdAt = Date.now()) {
+  if (blockedByGuard()) {
+    removeStoredPending(key);
+    return false;
+  }
+  if (inFlight.has(key)) return false;
+  if (alreadyFired(key)) {
+    removeStoredPending(key);
+    return false;
+  }
+  if (declined()) {
+    removeStoredPending(key);
+    return false;
+  }
+  const entry = { key, eventName, params, eventId, createdAt, dropped: false };
+  inFlight.set(key, entry);
+  pending.push(entry);
+  while (pending.length > PENDING_CAP) {
+    const oldest = pending.shift();
+    oldest.dropped = true;
+    if (inFlight.get(oldest.key) === oldest) inFlight.delete(oldest.key);
+  }
+  try {
     while (!(consent() && fbqReady())) {
-      if (Date.now() - startedAt >= WAIT_MS) return false;
-      await sleep(POLL_MS);
+      if (entry.dropped) return false;
+      const age = Date.now() - entry.createdAt;
+      if (age >= WAIT_MAX_MS) return false;
+      await sleep(age < FAST_POLL_WINDOW_MS ? FAST_POLL_MS : SLOW_POLL_MS);
     }
+    if (entry.dropped) return false;
     if (!consent() || !fbqReady() || alreadyFired(key)) return false;
     const fbq = window.fbq;
     try {
@@ -75,7 +139,54 @@ async function send(key, eventName, params, eventId) {
     markFired(key);
     return true;
   } finally {
-    inFlight.delete(key);
+    const wasDropped = entry.dropped;
+    leavePending(entry);
+    if (!wasDropped) removeStoredPending(key);
+  }
+}
+function isPlainObject(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+function flushStoredPending() {
+  if (typeof window === "undefined") return;
+  const raw = readStoredPending();
+  if (raw.length === 0) return;
+  const now = Date.now();
+  const valid = [];
+  for (const item of raw) {
+    if (!isPlainObject(item)) continue;
+    const { key, event, params, eventId, createdAt } = item;
+    if (typeof key !== "string" || !key) continue;
+    if (typeof event !== "string" || !EVENT_NAMES.includes(event)) continue;
+    if (!isPlainObject(params)) continue;
+    if (eventId !== null && typeof eventId !== "string") continue;
+    if (typeof createdAt !== "number" || !Number.isFinite(createdAt)) continue;
+    if (now - createdAt >= WAIT_MAX_MS) continue;
+    valid.push({
+      stored: item,
+      entry: {
+        key,
+        eventName: event,
+        params,
+        eventId,
+        createdAt: Math.min(createdAt, now),
+        dropped: false
+      }
+    });
+  }
+  if (valid.length !== raw.length) writeStoredPending(valid.map((v) => v.stored));
+  for (const { entry } of valid) {
+    if (inFlight.has(entry.key)) continue;
+    void send(entry.key, entry.eventName, entry.params, entry.eventId, entry.createdAt);
+  }
+}
+function persistPendingTracking() {
+  try {
+    if (typeof window === "undefined" || !consent()) return;
+    const items = pending.filter((e) => !e.dropped).map((e) => ({ key: e.key, event: e.eventName, params: e.params, eventId: e.eventId, createdAt: e.createdAt }));
+    if (items.length === 0) return;
+    window.sessionStorage.setItem(PENDING_KEY, JSON.stringify(items));
+  } catch {
   }
 }
 function paidAtOk(paidAt) {
@@ -101,15 +212,17 @@ async function trackPurchase(order) {
   }
   if (contents.length > 0) {
     params.content_ids = contents.map((c) => c.id);
+    params.content_type = "product";
     params.contents = contents;
   }
   const id = "purchase_" + order.orderId;
   return send(id, "Purchase", params, id);
 }
-async function trackLead(submissionId) {
+async function trackLead(submissionId, formKind) {
   if (typeof submissionId !== "string" || !submissionId) return false;
   const id = "lead_" + submissionId;
-  return send(id, "Lead", {}, id);
+  const params = typeof formKind === "string" && LEAD_FORM_KINDS.includes(formKind) ? { content_category: formKind } : {};
+  return send(id, "Lead", params, id);
 }
 async function trackCompleteRegistration(key, memberId) {
   if (typeof key !== "string" || !key) return false;
@@ -118,6 +231,7 @@ async function trackCompleteRegistration(key, memberId) {
 }
 export {
   configureTracking,
+  persistPendingTracking,
   trackCompleteRegistration,
   trackLead,
   trackPurchase
