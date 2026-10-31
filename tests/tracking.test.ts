@@ -476,6 +476,151 @@ describe('late consent', () => {
   });
 });
 
+describe('review round 1', () => {
+  const PKEY = 'tus:tracking:pending';
+  const stored = (over: Record<string, unknown> = {}) => ({
+    key: 'lead_p1',
+    event: 'Lead',
+    params: {},
+    eventId: 'lead_p1',
+    createdAt: NOW.getTime() - 5 * MIN,
+    ...over,
+  });
+  async function reloaded() {
+    vi.resetModules();
+    return import('../src/tracking');
+  }
+
+  it('(a) created before configureTracking, then declined config, then accept: never sent', async () => {
+    vi.resetModules();
+    const fresh = await import('../src/tracking');
+    let state: 'declined' | 'accepted' = 'declined';
+    const p = fresh.trackLead('s1'); // config is still null: nothing says declined yet
+    await vi.advanceTimersByTimeAsync(1_000);
+    fresh.configureTracking({ hasConsent: () => state === 'accepted', hasDeclined: () => state === 'declined' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    state = 'accepted';
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await p).toBe(false);
+    expect(fbq).not.toHaveBeenCalled();
+  });
+
+  it('(b) declined in-page after creation, then accept: never sent, stored copy removed', async () => {
+    let state: 'none' | 'declined' | 'accepted' = 'none';
+    mod.configureTracking({ hasConsent: () => state === 'accepted', hasDeclined: () => state === 'declined' });
+    const p = mod.trackLead('s1');
+    await vi.advanceTimersByTimeAsync(1_000);
+    window.sessionStorage.setItem(PKEY, JSON.stringify([stored({ key: 'lead_s1' })]));
+    state = 'declined';
+    await vi.advanceTimersByTimeAsync(300);
+    state = 'accepted';
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await p).toBe(false);
+    expect(fbq).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(PKEY)).toBeNull();
+  });
+
+  it('a decline that appears between the last wake and the send is honoured', async () => {
+    let declinedCalls = 0;
+    mod.configureTracking({
+      hasConsent: () => true,
+      hasDeclined: () => ++declinedCalls >= 3, // creation, loop wake: false; send time: true
+    });
+    expect(await mod.trackLead('s1')).toBe(false);
+    expect(fbq).not.toHaveBeenCalled();
+  });
+
+  it('cap drop removes the dropped entry from sessionStorage', async () => {
+    consent = false;
+    window.sessionStorage.setItem(PKEY, JSON.stringify([stored({ key: 'lead_n0' }), stored({ key: 'lead_other' })]));
+    for (let i = 0; i < 21; i++) void mod.trackLead('n' + i);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(JSON.parse(window.sessionStorage.getItem(PKEY)!).map((e: any) => e.key)).toEqual(['lead_other']);
+  });
+
+  it('a cap-dropped waiter that wakes with consent already true sends nothing', async () => {
+    consent = false;
+    const ps: Promise<boolean>[] = [];
+    for (let i = 0; i < 21; i++) ps.push(mod.trackLead('n' + i));
+    consent = true; // before any waiter wakes
+    await vi.advanceTimersByTimeAsync(300);
+    expect(await ps[0]).toBe(false);
+    expect(fbq.mock.calls.map((c) => c[3].eventID)).not.toContain('lead_n0');
+    expect(fbq).toHaveBeenCalledTimes(20);
+  });
+
+  it('persist with consent true and an empty list clears a stale pending list', () => {
+    window.sessionStorage.setItem(PKEY, JSON.stringify([stored()]));
+    mod.persistPendingTracking();
+    expect(window.sessionStorage.getItem(PKEY)).toBeNull();
+  });
+
+  it('persist with consent false leaves a stored list alone', () => {
+    window.sessionStorage.setItem(PKEY, JSON.stringify([stored()]));
+    consent = false;
+    mod.persistPendingTracking();
+    expect(window.sessionStorage.getItem(PKEY)).not.toBeNull();
+  });
+
+  it('flush: createdAt more than 10 min in the future is dropped and removed; 5 min is kept', async () => {
+    window.sessionStorage.setItem(
+      PKEY,
+      JSON.stringify([stored({ key: 'lead_far', eventId: 'lead_far', createdAt: NOW.getTime() + 11 * MIN }), stored({ key: 'lead_near', eventId: 'lead_near', createdAt: NOW.getTime() + 5 * MIN })]),
+    );
+    const next = await reloaded();
+    next.configureTracking({ hasConsent: () => consent });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(fbq).toHaveBeenCalledTimes(1);
+    expect(fbq.mock.calls[0][3]).toEqual({ eventID: 'lead_near' });
+    expect(window.sessionStorage.getItem(PKEY)).toBeNull();
+  });
+
+  it('age is checked before sending: no send lands past 1 h even when ready on the wake', async () => {
+    consent = false;
+    const p = mod.trackLead('s1');
+    await vi.advanceTimersByTimeAsync(HOUR - 1_000); // next 2 s wake is at 1 h + ~1 s
+    consent = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await p).toBe(false);
+    expect(fbq).not.toHaveBeenCalled();
+  });
+
+  it('polls every 250 ms for the first 10 s, then every 2 s', async () => {
+    let calls = 0;
+    consent = false;
+    mod.configureTracking({ hasConsent: () => { calls += 1; return consent; } });
+    void mod.trackLead('s1');
+    await vi.advanceTimersByTimeAsync(10_000);
+    const early = calls;
+    expect(early).toBeGreaterThanOrEqual(35);
+    calls = 0;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(calls).toBeGreaterThanOrEqual(4);
+    expect(calls).toBeLessThanOrEqual(6);
+  });
+
+  it('guard: a flushed entry on a /preview path is removed from storage and not sent', async () => {
+    window.sessionStorage.setItem(PKEY, JSON.stringify([stored()]));
+    setLocation('/preview/page');
+    const next = await reloaded();
+    next.configureTracking({ hasConsent: () => consent });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fbq).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(PKEY)).toBeNull();
+  });
+
+  it('guard: a flushed entry inside a frame is removed from storage and not sent', async () => {
+    window.sessionStorage.setItem(PKEY, JSON.stringify([stored()]));
+    const spy = vi.spyOn(window, 'top', 'get').mockReturnValue({} as unknown as Window);
+    const next = await reloaded();
+    next.configureTracking({ hasConsent: () => consent });
+    await vi.advanceTimersByTimeAsync(2_000);
+    spy.mockRestore();
+    expect(fbq).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(PKEY)).toBeNull();
+  });
+});
+
 describe('persistPendingTracking and the reload flush', () => {
   const PKEY = 'tus:tracking:pending';
   const entry = (over: Record<string, unknown> = {}) => ({

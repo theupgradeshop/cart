@@ -3,7 +3,8 @@ interface TrackingConfig {
     hasConsent: () => boolean;
     /**
      * True when the visitor has explicitly declined cookies (not merely "not answered yet").
-     * An event created while this is true is dropped at once and never queued.
+     * An event created while this is true is dropped at once and never queued; a waiting event is
+     * dropped (and its stored copy removed) the moment this turns true, at any time before it is sent.
      */
     hasDeclined?: () => boolean;
 }

@@ -456,6 +456,9 @@ void trackCompleteRegistration(`reg_course_${courseSlug}`, memberId);   // sign-
 
 - **Guard:** nothing inside a frame (`window.self !== window.top`) and nothing on a `/preview*` path.
 - **Declined:** an event created while `hasDeclined()` is true returns `false` at once and is never queued.
+  A decline at any time drops a waiting event too: `hasDeclined()` is re-read on every wake of the wait
+  and again right before `fbq` (so an event created before `configureTracking`, or before the visitor
+  declined, is never sent after a later accept); its stored copy is removed.
 - **Wait (late consent):** otherwise the event waits up to **1 hour from its creation** until
   `hasConsent() && typeof window.fbq === "function"`, polling every 250 ms for the first 10 s and every
   2 s after. Past 1 hour it is dropped, unmarked. Waiting events sit in a module-level list built
@@ -471,6 +474,11 @@ void trackCompleteRegistration(`reg_course_${courseSlug}`, memberId);   // sign-
   (guard, consent at send time, fired-key and in-flight dedup; Purchase rules were checked at creation).
   An entry stays in sessionStorage until its send completes (sent or refused), so a second navigation
   before the pixel loads does not lose it; calling `configureTracking` twice does not double-send.
+  The 1 h window is measured from the original event (the stored `createdAt`), not from the reload; a
+  `createdAt` more than 10 min in the future is rejected. At flush a stored entry is dropped and removed
+  when the visitor has declined (`hasDeclined()`), when the guard blocks the page (frame, `/preview`),
+  or when it is already fired. `persistPendingTracking()` with consent and an empty list clears a stale
+  stored list.
   Not covered: leaving or reloading before accepting, accepting in another tab. Purchase still recovers
   by reopening the thank-you page within 24 h of `paidAt`.
 - **Consent is re-read at send time**, right before `fbq` is called. Withdrawn during the wait: dropped.

@@ -119,15 +119,25 @@ async function send(key, eventName, params, eventId, createdAt = Date.now()) {
     const oldest = pending.shift();
     oldest.dropped = true;
     if (inFlight.get(oldest.key) === oldest) inFlight.delete(oldest.key);
+    removeStoredPending(oldest.key);
   }
   try {
-    while (!(consent() && fbqReady())) {
+    for (; ; ) {
       if (entry.dropped) return false;
+      if (declined()) {
+        removeStoredPending(key);
+        return false;
+      }
       const age = Date.now() - entry.createdAt;
       if (age >= WAIT_MAX_MS) return false;
+      if (consent() && fbqReady()) break;
       await sleep(age < FAST_POLL_WINDOW_MS ? FAST_POLL_MS : SLOW_POLL_MS);
     }
-    if (entry.dropped) return false;
+    if (declined()) {
+      removeStoredPending(key);
+      return false;
+    }
+    if (Date.now() - entry.createdAt >= WAIT_MAX_MS) return false;
     if (!consent() || !fbqReady() || alreadyFired(key)) return false;
     const fbq = window.fbq;
     try {
@@ -162,6 +172,7 @@ function flushStoredPending() {
     if (eventId !== null && typeof eventId !== "string") continue;
     if (typeof createdAt !== "number" || !Number.isFinite(createdAt)) continue;
     if (now - createdAt >= WAIT_MAX_MS) continue;
+    if (createdAt - now > MAX_FUTURE_SKEW_MS) continue;
     valid.push({
       stored: item,
       entry: {
@@ -184,8 +195,8 @@ function persistPendingTracking() {
   try {
     if (typeof window === "undefined" || !consent()) return;
     const items = pending.filter((e) => !e.dropped).map((e) => ({ key: e.key, event: e.eventName, params: e.params, eventId: e.eventId, createdAt: e.createdAt }));
-    if (items.length === 0) return;
-    window.sessionStorage.setItem(PENDING_KEY, JSON.stringify(items));
+    if (items.length === 0) window.sessionStorage.removeItem(PENDING_KEY);
+    else window.sessionStorage.setItem(PENDING_KEY, JSON.stringify(items));
   } catch {
   }
 }

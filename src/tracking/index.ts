@@ -7,7 +7,8 @@ export interface TrackingConfig {
   hasConsent: () => boolean;
   /**
    * True when the visitor has explicitly declined cookies (not merely "not answered yet").
-   * An event created while this is true is dropped at once and never queued.
+   * An event created while this is true is dropped at once and never queued; a waiting event is
+   * dropped (and its stored copy removed) the moment this turns true, at any time before it is sent.
    */
   hasDeclined?: () => boolean;
 }
@@ -37,7 +38,7 @@ const PENDING_CAP = 20;
 const LEAD_FORM_KINDS: readonly string[] = ['contact', 'newsletter', 'waitlist', 'popup', 'lesson', 'product'];
 const EVENT_NAMES: readonly string[] = ['Purchase', 'Lead', 'CompleteRegistration'];
 const MAX_PAID_AGE_MS = 24 * 60 * 60 * 1000;
-const MAX_FUTURE_SKEW_MS = 10 * 60 * 1000;
+const MAX_FUTURE_SKEW_MS = 10 * 60 * 1000; // also the clock skew accepted on a stored createdAt
 const STORE_KEY = 'tus:tracking:fired';
 const STORE_CAP = 200;
 const CURRENCY_RE = /^[A-Za-z]{3}$/;
@@ -183,16 +184,27 @@ async function send(
     const oldest = pending.shift() as PendingEntry;
     oldest.dropped = true;
     if (inFlight.get(oldest.key) === oldest) inFlight.delete(oldest.key);
+    removeStoredPending(oldest.key);
   }
   try {
-    while (!(consent() && fbqReady())) {
+    // Every wake: dropped by the cap, declined at any time (also before configureTracking ran), past 1 hour.
+    for (;;) {
       if (entry.dropped) return false;
+      if (declined()) {
+        removeStoredPending(key);
+        return false;
+      }
       const age = Date.now() - entry.createdAt;
       if (age >= WAIT_MAX_MS) return false;
+      if (consent() && fbqReady()) break;
       await sleep(age < FAST_POLL_WINDOW_MS ? FAST_POLL_MS : SLOW_POLL_MS);
     }
-    if (entry.dropped) return false;
-    // Send time: consent again, and another tab may have fired this key during the wait.
+    // Send time: declined and consent again, and another tab may have fired this key during the wait.
+    if (declined()) {
+      removeStoredPending(key);
+      return false;
+    }
+    if (Date.now() - entry.createdAt >= WAIT_MAX_MS) return false;
     if (!consent() || !fbqReady() || alreadyFired(key)) return false;
     const fbq = (window as FbqWindow).fbq as Fbq;
     try {
@@ -230,6 +242,7 @@ function flushStoredPending(): void {
     if (eventId !== null && typeof eventId !== 'string') continue;
     if (typeof createdAt !== 'number' || !Number.isFinite(createdAt)) continue;
     if (now - createdAt >= WAIT_MAX_MS) continue;
+    if (createdAt - now > MAX_FUTURE_SKEW_MS) continue; // a clock far ahead would restart the window on every reload
     valid.push({
       stored: item,
       entry: {
@@ -260,8 +273,8 @@ export function persistPendingTracking(): void {
     const items = pending
       .filter((e) => !e.dropped)
       .map((e) => ({ key: e.key, event: e.eventName, params: e.params, eventId: e.eventId, createdAt: e.createdAt }));
-    if (items.length === 0) return;
-    window.sessionStorage.setItem(PENDING_KEY, JSON.stringify(items));
+    if (items.length === 0) window.sessionStorage.removeItem(PENDING_KEY); // clear a stale list
+    else window.sessionStorage.setItem(PENDING_KEY, JSON.stringify(items));
   } catch {
     // never throw
   }
