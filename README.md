@@ -500,7 +500,7 @@ void trackCompleteRegistration(`reg_course_${courseSlug}`, memberId);   // sign-
 The 24 h gate narrows a re-count from another browser; it does not close it. Owner-facing behaviour,
 per-site call points and gaps: `wiki/customer-websites/meta-pixel-conversion-events.md`.
 
-## Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.1)
+## Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.2)
 
 Spec: `knowledge/cowork/lead/plans/2026-10-31-websites-o-p-under-construction-and-sign-in-problems-SPEC.md` (D2-D5).
 The dashboard decides whether a site is "under construction"; this entry is the site-side gate that asks it and
@@ -562,6 +562,12 @@ before any forward, and token-bearing forwards are capped per process (5 burst, 
 A cookie is deleted only on a definitive 2xx "invalid" answer, never on a timeout, 429, 5xx, bad body or the
 last-known fallback. Incoming `x-tus-site-*` and `x-tus-uc-*` request headers are stripped on every response the
 gate builds (the `null` path cannot rewrite the request).
+
+**Visitor-rewrite headers:** `siteGate(..., { rewriteRequestHeaders: (req) => ({ 'x-tus-language': lang }) })` adds request
+headers to the visitor rewrite (so a multilingual site's `<html lang dir>` is right on the coming-soon page, which
+returns before the site's own language handling). It runs after the gate strips `x-tus-site-*` / `x-tus-uc-*`, can never
+override `x-tus-uc-variant` / `x-tus-uc-business-name`, and a throw is ignored. `cleanGateRequestHeaders(headers)` is the same
+strip for a site's own pass-through request headers.
 
 **Render route contract:** `/site-coming-soon` reads the variant and the business name ONLY from the request headers the gate
 sets (`x-tus-uc-variant`, `x-tus-uc-business-name`), treats them as untrusted text, and wraps `decodeURIComponent` of the

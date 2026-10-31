@@ -12,6 +12,12 @@ interface SiteGateOptions {
     extraSkip?: (pathname: string) => boolean;
     /** Test seam; defaults to the global fetch. */
     fetchImpl?: typeof fetch;
+    /**
+     * Extra request headers for the visitor rewrite (e.g. the site's `x-tus-language`, which its own language
+     * handling would have set after the gate). Applied after the gate strips `x-tus-site-*` / `x-tus-uc-*`; it can
+     * never override `x-tus-uc-variant` / `x-tus-uc-business-name`. A throw is ignored (no extra headers).
+     */
+    rewriteRequestHeaders?: (req: NextRequest) => Record<string, string>;
 }
 interface SiteGateAnswer {
     on: boolean;
@@ -35,6 +41,8 @@ declare function __siteGateCacheSizes(): {
     tokened: number;
     tokenless: number;
 };
+/** Copy of `headers` without any `x-tus-site-*` / `x-tus-uc-*` entry (for a site's own pass-through headers). */
+declare function cleanGateRequestHeaders(headers: Headers): Headers;
 declare function siteGate(req: NextRequest, opts: SiteGateOptions): Promise<Response | null>;
 
-export { type SiteGateAnswer, type SiteGateOptions, type SiteGateVariant, type SiteGateView, __resetSiteGateForTests, __siteGateCacheSizes, isSiteGateSkipped, siteGate, thankYouSkip };
+export { type SiteGateAnswer, type SiteGateOptions, type SiteGateVariant, type SiteGateView, __resetSiteGateForTests, __siteGateCacheSizes, cleanGateRequestHeaders, isSiteGateSkipped, siteGate, thankYouSkip };

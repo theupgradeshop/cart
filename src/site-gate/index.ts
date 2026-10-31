@@ -1,4 +1,4 @@
-// Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.1; spec websites-o-p D5, council 2026-10-31).
+// Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.2; spec websites-o-p D5, council 2026-10-31).
 // Server-safe entry: NO 'use client', no React. Runs first in a site's middleware/proxy.
 //
 // siteGate(req, opts) -> Response | null.  null = "not gated, carry on" (mode off, skipped path, dashboard
@@ -27,6 +27,12 @@ export interface SiteGateOptions {
   extraSkip?: (pathname: string) => boolean;
   /** Test seam; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
+  /**
+   * Extra request headers for the visitor rewrite (e.g. the site's `x-tus-language`, which its own language
+   * handling would have set after the gate). Applied after the gate strips `x-tus-site-*` / `x-tus-uc-*`; it can
+   * never override `x-tus-uc-variant` / `x-tus-uc-business-name`. A throw is ignored (no extra headers).
+   */
+  rewriteRequestHeaders?: (req: NextRequest) => Record<string, string>;
 }
 
 export interface SiteGateAnswer {
@@ -326,8 +332,9 @@ async function getTokened(
 
 const SECURE_HOST_COOKIE = { httpOnly: true, secure: true, sameSite: 'lax' as const, path: '/' };
 
-function cleanRequestHeaders(req: NextRequest): Headers {
-  const h = new Headers(req.headers);
+/** Copy of `headers` without any `x-tus-site-*` / `x-tus-uc-*` entry (for a site's own pass-through headers). */
+export function cleanGateRequestHeaders(headers: Headers): Headers {
+  const h = new Headers(headers);
   const drop: string[] = [];
   h.forEach((_v, k) => {
     if (k.startsWith('x-tus-site-') || k.startsWith('x-tus-uc-')) drop.push(k);
@@ -336,12 +343,28 @@ function cleanRequestHeaders(req: NextRequest): Headers {
   return h;
 }
 
+function cleanRequestHeaders(req: NextRequest): Headers {
+  return cleanGateRequestHeaders(req.headers);
+}
+
 function visitorResponse(
   req: NextRequest,
   info: { variant: SiteGateVariant; businessName: string },
   deleteCookies: string[],
+  extraHeaders?: (req: NextRequest) => Record<string, string>,
 ): NextResponse {
   const headers = cleanRequestHeaders(req);
+  if (extraHeaders) {
+    try {
+      for (const [k, v] of Object.entries(extraHeaders(req) ?? {})) {
+        const name = k.toLowerCase();
+        if (name === 'x-tus-uc-variant' || name === 'x-tus-uc-business-name') continue;
+        headers.set(k, String(v));
+      }
+    } catch {
+      // a broken hook never fails the rewrite
+    }
+  }
   headers.set('x-tus-uc-variant', info.variant);
   headers.set('x-tus-uc-business-name', encodeName(info.businessName));
   const res = NextResponse.rewrite(new URL('/site-coming-soon', req.url), {
@@ -424,6 +447,7 @@ function isComingSoonRequest(req: NextRequest): boolean {
 async function gateInner(req: NextRequest, opts: SiteGateOptions): Promise<Response | null> {
   try {
     const { domain, platformUrl } = opts;
+    const hook = opts.rewriteRequestHeaders;
     if (!domain || !platformUrl) return null;
     const pathname = req.nextUrl.pathname;
     if (isSiteGateSkipped(pathname)) return null;
@@ -450,8 +474,8 @@ async function gateInner(req: NextRequest, opts: SiteGateOptions): Promise<Respo
           res.cookies.set(PREVIEW_COOKIE, candidate, SECURE_HOST_COOKIE); // session cookie: no maxAge
           return res;
         }
-        if (answer) return visitorResponse(req, answer, []); // invalid/turned-off link: visitor view, no cookie
-        return unreachable(req, domain);
+        if (answer) return visitorResponse(req, answer, [], hook); // invalid/turned-off link: visitor view, no cookie
+        return unreachable(req, domain, hook);
       }
       // malformed value: nothing is forwarded; fall through as an ordinary request
     }
@@ -468,19 +492,19 @@ async function gateInner(req: NextRequest, opts: SiteGateOptions): Promise<Respo
       const answer = await getTokenless(domain, platformUrl, fetchImpl);
       if (!answer) return null; // cold start with the dashboard down: open
       if (!answer.on) return offResponse(req, pathname);
-      return visitorResponse(req, answer, []);
+      return visitorResponse(req, answer, [], hook);
     }
 
     const key = await sha256Hex(`${domain}\n${tokens.pass ?? ''}\n${tokens.preview ?? ''}`);
     const answer = await getTokened(key, domain, platformUrl, tokens, fetchImpl);
-    if (!answer) return unreachable(req, domain);
+    if (!answer) return unreachable(req, domain, hook);
     if (!answer.on) return offResponse(req, pathname);
     if (answer.view === 'visitor') {
       // A definitive 2xx "invalid" answer: the only time a cookie is deleted.
       const del: string[] = [];
       if (tokens.pass) del.push(PASS_COOKIE);
       if (tokens.preview) del.push(PREVIEW_COOKIE);
-      return visitorResponse(req, answer, del);
+      return visitorResponse(req, answer, del, hook);
     }
     return insideResponse(req, answer.view, domain);
   } catch {
@@ -492,8 +516,8 @@ async function gateInner(req: NextRequest, opts: SiteGateOptions): Promise<Respo
  * The dashboard could not give a token-bearing request an answer (down, slow, 429, malformed, over the cap).
  * Visitor view, unless the last TOKENLESS answer on record was "off" (then open). The cookie is kept.
  */
-function unreachable(req: NextRequest, domain: string): Response | null {
+function unreachable(req: NextRequest, domain: string, hook?: SiteGateOptions['rewriteRequestHeaders']): Response | null {
   const last = tokenless.get(domain)?.answer ?? null;
   if (last && !last.on) return null;
-  return visitorResponse(req, last ?? { variant: 'centered', businessName: '' }, []);
+  return visitorResponse(req, last ?? { variant: 'centered', businessName: '' }, [], hook);
 }

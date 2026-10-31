@@ -7,6 +7,7 @@ import {
   isSiteGateSkipped,
   __resetSiteGateForTests,
   __siteGateCacheSizes,
+  cleanGateRequestHeaders,
 } from '../src/site-gate';
 
 const DOMAIN = 'shop.example.test';
@@ -617,5 +618,57 @@ describe('review round 1', () => {
       headers: { 'x-forwarded-host': DOMAIN.toUpperCase() + ':443', 'x-forwarded-proto': 'https' },
     });
     expect((await gate(r, f))!.headers.get('location')).toBe(`https://${DOMAIN}/x`);
+  });
+});
+
+describe('rewriteRequestHeaders hook + cleanGateRequestHeaders', () => {
+  const hdr = (res: Response, n: string) => res.headers.get(`x-middleware-request-${n}`);
+
+  it('merges the hook result into the visitor rewrite (and the direct /site-coming-soon one)', async () => {
+    const f = dashboard(() => json(visitorAns()));
+    for (const p of ['/about', '/site-coming-soon']) {
+      const res = (await gate(req(p), f, { rewriteRequestHeaders: () => ({ 'x-tus-language': 'he' }) }))!;
+      expect(res.status).toBe(503);
+      expect(hdr(res, 'x-tus-language')).toBe('he');
+    }
+  });
+
+  it('is applied also on the token-invalid and unreachable visitor paths', async () => {
+    const f = dashboard(() => new Response('x', { status: 500 }));
+    const res = (await gate(req('/', { cookies: { '__Host-tus_site_pass': PASS } }), f, { rewriteRequestHeaders: () => ({ 'x-tus-language': 'en' }) }))!;
+    expect(hdr(res, 'x-tus-language')).toBe('en');
+  });
+
+  it('cannot override x-tus-uc-variant / x-tus-uc-business-name (any case)', async () => {
+    const f = dashboard(() => json(visitorAns()));
+    const res = (await gate(req('/'), f, {
+      rewriteRequestHeaders: () => ({ 'x-tus-uc-variant': 'banner', 'X-Tus-Uc-Business-Name': 'Evil', 'x-ok': '1' }),
+    }))!;
+    expect(hdr(res, 'x-tus-uc-variant')).toBe('split');
+    expect(hdr(res, 'x-tus-uc-business-name')).toBe(encodeURIComponent('Acme Café'));
+    expect(hdr(res, 'x-ok')).toBe('1');
+  });
+
+  it('a throwing hook is ignored: the rewrite still happens', async () => {
+    const f = dashboard(() => json(visitorAns()));
+    const res = (await gate(req('/'), f, { rewriteRequestHeaders: () => { throw new Error('boom'); } }))!;
+    expect(res.status).toBe(503);
+    expect(hdr(res, 'x-tus-uc-variant')).toBe('split');
+  });
+
+  it('the hook runs after the strip: a client-sent x-tus-site-* is gone, the hook value stays', async () => {
+    const f = dashboard(() => json(visitorAns()));
+    const res = (await gate(req('/', { headers: { 'x-tus-site-pass': 'x', 'x-tus-language': 'zz' } }), f, {
+      rewriteRequestHeaders: () => ({ 'x-tus-language': 'he' }),
+    }))!;
+    expect(overrideList(res)).not.toContain('x-tus-site-pass');
+    expect(hdr(res, 'x-tus-language')).toBe('he');
+  });
+
+  it('cleanGateRequestHeaders strips x-tus-site-* and x-tus-uc-* and keeps the rest, without mutating the input', () => {
+    const h = new Headers({ 'x-tus-site-pass': 'a', 'X-Tus-Uc-Variant': 'b', 'x-tus-language': 'he', cookie: 'c=1' });
+    const c = cleanGateRequestHeaders(h);
+    expect([...Object.keys(Object.fromEntries(c.entries()))].sort()).toEqual(['cookie', 'x-tus-language']);
+    expect(h.get('x-tus-site-pass')).toBe('a');
   });
 });

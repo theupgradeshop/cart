@@ -22,6 +22,7 @@ var index_exports = {};
 __export(index_exports, {
   __resetSiteGateForTests: () => __resetSiteGateForTests,
   __siteGateCacheSizes: () => __siteGateCacheSizes,
+  cleanGateRequestHeaders: () => cleanGateRequestHeaders,
   isSiteGateSkipped: () => isSiteGateSkipped,
   siteGate: () => siteGate,
   thankYouSkip: () => thankYouSkip
@@ -239,8 +240,8 @@ async function getTokened(key, domain, platformUrl, tokens, fetchImpl) {
   return refresh(e, domain, platformUrl, tokens, fetchImpl, false, true);
 }
 var SECURE_HOST_COOKIE = { httpOnly: true, secure: true, sameSite: "lax", path: "/" };
-function cleanRequestHeaders(req) {
-  const h = new Headers(req.headers);
+function cleanGateRequestHeaders(headers) {
+  const h = new Headers(headers);
   const drop = [];
   h.forEach((_v, k) => {
     if (k.startsWith("x-tus-site-") || k.startsWith("x-tus-uc-")) drop.push(k);
@@ -248,8 +249,21 @@ function cleanRequestHeaders(req) {
   for (const k of drop) h.delete(k);
   return h;
 }
-function visitorResponse(req, info, deleteCookies) {
+function cleanRequestHeaders(req) {
+  return cleanGateRequestHeaders(req.headers);
+}
+function visitorResponse(req, info, deleteCookies, extraHeaders) {
   const headers = cleanRequestHeaders(req);
+  if (extraHeaders) {
+    try {
+      for (const [k, v] of Object.entries(extraHeaders(req) ?? {})) {
+        const name = k.toLowerCase();
+        if (name === "x-tus-uc-variant" || name === "x-tus-uc-business-name") continue;
+        headers.set(k, String(v));
+      }
+    } catch {
+    }
+  }
   headers.set("x-tus-uc-variant", info.variant);
   headers.set("x-tus-uc-business-name", encodeName(info.businessName));
   const res = import_server.NextResponse.rewrite(new URL("/site-coming-soon", req.url), {
@@ -315,6 +329,7 @@ function isComingSoonRequest(req) {
 async function gateInner(req, opts) {
   try {
     const { domain, platformUrl } = opts;
+    const hook = opts.rewriteRequestHeaders;
     if (!domain || !platformUrl) return null;
     const pathname = req.nextUrl.pathname;
     if (isSiteGateSkipped(pathname)) return null;
@@ -340,8 +355,8 @@ ${candidate}`), domain, platformUrl, tokens2, fetchImpl);
           res.cookies.set(PREVIEW_COOKIE, candidate, SECURE_HOST_COOKIE);
           return res;
         }
-        if (answer2) return visitorResponse(req, answer2, []);
-        return unreachable(req, domain);
+        if (answer2) return visitorResponse(req, answer2, [], hook);
+        return unreachable(req, domain, hook);
       }
     }
     const tokens = {};
@@ -354,34 +369,35 @@ ${candidate}`), domain, platformUrl, tokens2, fetchImpl);
       const answer2 = await getTokenless(domain, platformUrl, fetchImpl);
       if (!answer2) return null;
       if (!answer2.on) return offResponse(req, pathname);
-      return visitorResponse(req, answer2, []);
+      return visitorResponse(req, answer2, [], hook);
     }
     const key = await sha256Hex(`${domain}
 ${tokens.pass ?? ""}
 ${tokens.preview ?? ""}`);
     const answer = await getTokened(key, domain, platformUrl, tokens, fetchImpl);
-    if (!answer) return unreachable(req, domain);
+    if (!answer) return unreachable(req, domain, hook);
     if (!answer.on) return offResponse(req, pathname);
     if (answer.view === "visitor") {
       const del = [];
       if (tokens.pass) del.push(PASS_COOKIE);
       if (tokens.preview) del.push(PREVIEW_COOKIE);
-      return visitorResponse(req, answer, del);
+      return visitorResponse(req, answer, del, hook);
     }
     return insideResponse(req, answer.view, domain);
   } catch {
     return null;
   }
 }
-function unreachable(req, domain) {
+function unreachable(req, domain, hook) {
   const last = tokenless.get(domain)?.answer ?? null;
   if (last && !last.on) return null;
-  return visitorResponse(req, last ?? { variant: "centered", businessName: "" }, []);
+  return visitorResponse(req, last ?? { variant: "centered", businessName: "" }, [], hook);
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   __resetSiteGateForTests,
   __siteGateCacheSizes,
+  cleanGateRequestHeaders,
   isSiteGateSkipped,
   siteGate,
   thankYouSkip
