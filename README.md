@@ -500,7 +500,7 @@ void trackCompleteRegistration(`reg_course_${courseSlug}`, memberId);   // sign-
 The 24 h gate narrows a re-count from another browser; it does not close it. Owner-facing behaviour,
 per-site call points and gaps: `wiki/customer-websites/meta-pixel-conversion-events.md`.
 
-## Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.2)
+## Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.3)
 
 Spec: `knowledge/cowork/lead/plans/2026-10-31-websites-o-p-under-construction-and-sign-in-problems-SPEC.md` (D2-D5).
 The dashboard decides whether a site is "under construction"; this entry is the site-side gate that asks it and
@@ -569,6 +569,10 @@ returns before the site's own language handling). It runs after the gate strips 
 override `x-tus-uc-variant` / `x-tus-uc-business-name`, and a throw is ignored. `cleanGateRequestHeaders(headers)` is the same
 strip for a site's own pass-through request headers.
 
+**Banner ink:** the dashboard answer may carry `bannerInk: "dark"|"light"` (default `light`); the visitor rewrite sets the
+request header `x-tus-uc-banner-ink` next to `x-tus-uc-variant` (the hook cannot override it; the render route reads it
+like the other two). The direct-request 404 guard also covers a language prefix (`/he/site-coming-soon`).
+
 **Render route contract:** `/site-coming-soon` reads the variant and the business name ONLY from the request headers the gate
 sets (`x-tus-uc-variant`, `x-tus-uc-business-name`), treats them as untrusted text, and wraps `decodeURIComponent` of the
 name in try/catch (empty name on failure). Cookie lifetimes: `__Host-tus_site_preview` session; `__Host-tus_site_pass` set by
@@ -578,7 +582,9 @@ the site's route (pass expiry); `tus_site_view` 30 s. The 302 location takes its
 **Client:** `<SiteGateBar text visitorViewLabel settingsLabel settingsUrl />` (team: slim charcoal sticky bar, gold dot;
 "view as visitors" link = current URL + `tus_view=visitor`) and `<PreviewPill text />` (preview guests, bottom-start).
 Words come from the site. Both read `tus_site_view` after mount and render nothing on `/preview*` or inside an iframe.
-Inline styles with logical properties (RTL needs nothing).
+Inline styles with logical properties (RTL needs nothing). While the bar shows it publishes its measured height as
+`--tus-site-gate-bar-h` on `<html>` (ResizeObserver; removed on unmount or when no bar renders). A site with a fixed header
+offsets it with `top: var(--tus-site-gate-bar-h, 0px)`.
 
 ## Development
 

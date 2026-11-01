@@ -1,4 +1,4 @@
-// Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.2; spec websites-o-p D5, council 2026-10-31).
+// Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.3; spec websites-o-p D5, council 2026-10-31).
 // Server-safe entry: NO 'use client', no React. Runs first in a site's middleware/proxy.
 //
 // siteGate(req, opts) -> Response | null.  null = "not gated, carry on" (mode off, skipped path, dashboard
@@ -40,6 +40,8 @@ export interface SiteGateAnswer {
   view: SiteGateView;
   variant: SiteGateVariant;
   businessName: string;
+  /** Ink for the banner variant; the dashboard may omit it (default "light"). */
+  bannerInk: 'dark' | 'light';
 }
 
 // ---------------------------------------------------------------- skip list
@@ -47,6 +49,8 @@ export interface SiteGateAnswer {
 const SKIP_PREFIXES = ['/api', '/_next', '/preview', '/brand-icon', '/d', '/l'];
 /** The render route. NOT skipped: it is gated like any page (a direct request never renders it in public). */
 const COMING_SOON_PATH = '/site-coming-soon';
+/** `/site-coming-soon` with an optional language prefix (`/he/…`, `/pt-br/…`) and optional trailing slash. */
+const COMING_SOON_RE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?site-coming-soon\/?$/i;
 const FILE_EXT_RE = /\.[A-Za-z0-9]+$/;
 const SKIP_EXACT = ['/robots.txt', '/sitemap.xml'];
 
@@ -161,7 +165,7 @@ function parseAnswer(data: unknown): SiteGateAnswer | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
   if (typeof d.on !== 'boolean') return null;
-  if (!d.on) return { on: false, view: 'visitor', variant: 'centered', businessName: '' };
+  if (!d.on) return { on: false, view: 'visitor', variant: 'centered', businessName: '', bannerInk: 'light' };
   if (typeof d.view !== 'string' || !VIEWS.includes(d.view)) return null;
   if (typeof d.variant !== 'string' || !VARIANTS.includes(d.variant)) return null;
   if (typeof d.businessName !== 'string') return null;
@@ -170,6 +174,7 @@ function parseAnswer(data: unknown): SiteGateAnswer | null {
     view: d.view as SiteGateView,
     variant: d.variant as SiteGateVariant,
     businessName: cleanName(d.businessName),
+    bannerInk: d.bannerInk === 'dark' ? 'dark' : 'light',
   };
 }
 
@@ -349,7 +354,7 @@ function cleanRequestHeaders(req: NextRequest): Headers {
 
 function visitorResponse(
   req: NextRequest,
-  info: { variant: SiteGateVariant; businessName: string },
+  info: { variant: SiteGateVariant; businessName: string; bannerInk?: 'dark' | 'light' },
   deleteCookies: string[],
   extraHeaders?: (req: NextRequest) => Record<string, string>,
 ): NextResponse {
@@ -358,7 +363,7 @@ function visitorResponse(
     try {
       for (const [k, v] of Object.entries(extraHeaders(req) ?? {})) {
         const name = k.toLowerCase();
-        if (name === 'x-tus-uc-variant' || name === 'x-tus-uc-business-name') continue;
+        if (name === 'x-tus-uc-variant' || name === 'x-tus-uc-business-name' || name === 'x-tus-uc-banner-ink') continue;
         headers.set(k, String(v));
       }
     } catch {
@@ -366,6 +371,7 @@ function visitorResponse(
     }
   }
   headers.set('x-tus-uc-variant', info.variant);
+  headers.set('x-tus-uc-banner-ink', info.bannerInk === 'dark' ? 'dark' : 'light');
   headers.set('x-tus-uc-business-name', encodeName(info.businessName));
   const res = NextResponse.rewrite(new URL('/site-coming-soon', req.url), {
     status: 503,
@@ -395,7 +401,7 @@ function requestOrigin(req: NextRequest, domain: string): { proto: 'http' | 'htt
 
 /** Mode off: open (null), but expire a leftover team/preview bar cookie. */
 function offResponse(req: NextRequest, pathname: string): Response | null {
-  if (pathname === COMING_SOON_PATH || pathname.startsWith(COMING_SOON_PATH + '/')) return null;
+  if (COMING_SOON_RE.test(pathname)) return null;
   if (!req.cookies.get(VIEW_COOKIE)) return null;
   const res = NextResponse.next();
   res.cookies.set(VIEW_COOKIE, '', { path: '/', maxAge: 0 });
@@ -437,8 +443,7 @@ export async function siteGate(req: NextRequest, opts: SiteGateOptions): Promise
 
 function isComingSoonRequest(req: NextRequest): boolean {
   try {
-    const p = req.nextUrl.pathname;
-    return p === COMING_SOON_PATH || p.startsWith(COMING_SOON_PATH + '/');
+    return COMING_SOON_RE.test(req.nextUrl.pathname);
   } catch {
     return false;
   }

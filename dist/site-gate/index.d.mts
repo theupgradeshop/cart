@@ -24,6 +24,8 @@ interface SiteGateAnswer {
     view: SiteGateView;
     variant: SiteGateVariant;
     businessName: string;
+    /** Ink for the banner variant; the dashboard may omit it (default "light"). */
+    bannerInk: 'dark' | 'light';
 }
 /** Paths the gate never touches. Segment-boundary matches only: `/api-docs` and `/preview-x` are gated. */
 declare function isSiteGateSkipped(pathname: string): boolean;

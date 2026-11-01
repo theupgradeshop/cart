@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
 import { SiteGateBar, PreviewPill } from '../src/site-gate/client';
 
@@ -108,5 +108,42 @@ describe('review round 1 (client)', () => {
     const href = getByText('View as visitors see it').getAttribute('href')!;
     expect(href.startsWith('//')).toBe(false);
     expect(href.startsWith('/')).toBe(true);
+  });
+});
+
+describe('bar height variable', () => {
+  const V = '--tus-site-gate-bar-h';
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('publishes the measured height, updates on resize, removes on unmount', () => {
+    let cb: () => void = () => {};
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal('ResizeObserver', class { constructor(c: () => void) { cb = c; } observe = observe; disconnect = disconnect; });
+    let h = 32;
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ height: h }) as DOMRect);
+    setView('team');
+    const { unmount } = render(bar);
+    expect(document.documentElement.style.getPropertyValue(V)).toBe('32px');
+    expect(observe).toHaveBeenCalled();
+    h = 58;
+    cb();
+    expect(document.documentElement.style.getPropertyValue(V)).toBe('58px');
+    unmount();
+    expect(document.documentElement.style.getPropertyValue(V)).toBe('');
+    expect(disconnect).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('no bar -> no variable; no ResizeObserver -> no error', () => {
+    setView('preview');
+    render(bar);
+    expect(document.documentElement.style.getPropertyValue(V)).toBe('');
+    cleanup();
+    vi.stubGlobal('ResizeObserver', undefined);
+    setView('team');
+    expect(() => render(bar)).not.toThrow();
+    cleanup();
+    expect(document.documentElement.style.getPropertyValue(V)).toBe('');
   });
 });

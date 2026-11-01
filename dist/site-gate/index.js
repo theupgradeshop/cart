@@ -39,7 +39,7 @@ var VIEW_PARAM = "tus_view";
 
 // src/site-gate/index.ts
 var SKIP_PREFIXES = ["/api", "/_next", "/preview", "/brand-icon", "/d", "/l"];
-var COMING_SOON_PATH = "/site-coming-soon";
+var COMING_SOON_RE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?site-coming-soon\/?$/i;
 var FILE_EXT_RE = /\.[A-Za-z0-9]+$/;
 var SKIP_EXACT = ["/robots.txt", "/sitemap.xml"];
 function underSegment(pathname, prefix) {
@@ -109,7 +109,7 @@ function parseAnswer(data) {
   if (!data || typeof data !== "object") return null;
   const d = data;
   if (typeof d.on !== "boolean") return null;
-  if (!d.on) return { on: false, view: "visitor", variant: "centered", businessName: "" };
+  if (!d.on) return { on: false, view: "visitor", variant: "centered", businessName: "", bannerInk: "light" };
   if (typeof d.view !== "string" || !VIEWS.includes(d.view)) return null;
   if (typeof d.variant !== "string" || !VARIANTS.includes(d.variant)) return null;
   if (typeof d.businessName !== "string") return null;
@@ -117,7 +117,8 @@ function parseAnswer(data) {
     on: true,
     view: d.view,
     variant: d.variant,
-    businessName: cleanName(d.businessName)
+    businessName: cleanName(d.businessName),
+    bannerInk: d.bannerInk === "dark" ? "dark" : "light"
   };
 }
 async function fetchAnswer(domain, platformUrl, tokens, fetchImpl) {
@@ -258,13 +259,14 @@ function visitorResponse(req, info, deleteCookies, extraHeaders) {
     try {
       for (const [k, v] of Object.entries(extraHeaders(req) ?? {})) {
         const name = k.toLowerCase();
-        if (name === "x-tus-uc-variant" || name === "x-tus-uc-business-name") continue;
+        if (name === "x-tus-uc-variant" || name === "x-tus-uc-business-name" || name === "x-tus-uc-banner-ink") continue;
         headers.set(k, String(v));
       }
     } catch {
     }
   }
   headers.set("x-tus-uc-variant", info.variant);
+  headers.set("x-tus-uc-banner-ink", info.bannerInk === "dark" ? "dark" : "light");
   headers.set("x-tus-uc-business-name", encodeName(info.businessName));
   const res = import_server.NextResponse.rewrite(new URL("/site-coming-soon", req.url), {
     status: 503,
@@ -285,7 +287,7 @@ function requestOrigin(req, domain) {
   return { proto, host };
 }
 function offResponse(req, pathname) {
-  if (pathname === COMING_SOON_PATH || pathname.startsWith(COMING_SOON_PATH + "/")) return null;
+  if (COMING_SOON_RE.test(pathname)) return null;
   if (!req.cookies.get(VIEW_COOKIE)) return null;
   const res = import_server.NextResponse.next();
   res.cookies.set(VIEW_COOKIE, "", { path: "/", maxAge: 0 });
@@ -320,8 +322,7 @@ async function siteGate(req, opts) {
 }
 function isComingSoonRequest(req) {
   try {
-    const p = req.nextUrl.pathname;
-    return p === COMING_SOON_PATH || p.startsWith(COMING_SOON_PATH + "/");
+    return COMING_SOON_RE.test(req.nextUrl.pathname);
   } catch {
     return false;
   }

@@ -34,6 +34,7 @@ var VIEW_PARAM = "tus_view";
 
 // src/site-gate/client.tsx
 var import_jsx_runtime = require("react/jsx-runtime");
+var BAR_VAR = "--tus-site-gate-bar-h";
 var FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 var CHARCOAL = "#1A1A1A";
 var GOLD = "#C8981E";
@@ -89,11 +90,32 @@ function SiteGateBar({ text, visitorViewLabel, settingsLabel, settingsUrl }) {
   (0, import_react.useEffect)(() => {
     if (view === "team") setVisitorHref(visitorViewHref());
   }, [view]);
-  if (view !== "team") return null;
+  const barRef = (0, import_react.useRef)(null);
+  const shown = view === "team";
+  (0, import_react.useEffect)(() => {
+    if (!shown) return;
+    const root = document.documentElement;
+    const el = barRef.current;
+    const publish = () => {
+      if (el) root.style.setProperty(BAR_VAR, `${Math.round(el.getBoundingClientRect().height)}px`);
+    };
+    publish();
+    let ro;
+    if (typeof ResizeObserver !== "undefined" && el) {
+      ro = new ResizeObserver(publish);
+      ro.observe(el);
+    }
+    return () => {
+      ro?.disconnect();
+      root.style.removeProperty(BAR_VAR);
+    };
+  }, [shown]);
+  if (!shown) return null;
   const link = { color: "#fff", textDecoration: "underline", textUnderlineOffset: 2 };
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
     "div",
     {
+      ref: barRef,
       "data-site-gate-bar": "",
       role: "region",
       style: {

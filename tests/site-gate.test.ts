@@ -502,7 +502,7 @@ describe('review round 1', () => {
     expect(res.status).toBe(404);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
     expect(res.headers.get('x-middleware-next')).toBeNull();
-    expect((await gate(req('/site-coming-soon/x'), f))!.status).toBe(404);
+    expect(await gate(req('/site-coming-soon/x'), f)).toBeNull(); // no such route: Next answers its own 404
     expect(await gate(req('/site-coming-soonx'), f)).toBeNull();
   });
 
@@ -670,5 +670,36 @@ describe('rewriteRequestHeaders hook + cleanGateRequestHeaders', () => {
     const c = cleanGateRequestHeaders(h);
     expect([...Object.keys(Object.fromEntries(c.entries()))].sort()).toEqual(['cookie', 'x-tus-language']);
     expect(h.get('x-tus-site-pass')).toBe('a');
+  });
+});
+
+describe('v1.7.3', () => {
+  const hdr = (res: Response, n: string) => res.headers.get(`x-middleware-request-${n}`);
+  it('bannerInk: dark passes through, missing defaults to light, junk -> light; hook cannot override', async () => {
+    let ans: Answer = visitorAns({ bannerInk: 'dark' });
+    const f = dashboard(() => json(ans));
+    const hook = { rewriteRequestHeaders: () => ({ 'x-tus-uc-banner-ink': 'dark' }) };
+    expect(hdr((await gate(req('/'), f))!, 'x-tus-uc-banner-ink')).toBe('dark');
+    __resetSiteGateForTests();
+    ans = visitorAns();
+    expect(hdr((await gate(req('/', { headers: { 'x-tus-uc-banner-ink': 'dark' } }), f, hook))!, 'x-tus-uc-banner-ink')).toBe('light');
+    __resetSiteGateForTests();
+    ans = visitorAns({ bannerInk: 'neon' });
+    expect(hdr((await gate(req('/'), f))!, 'x-tus-uc-banner-ink')).toBe('light');
+  });
+
+  it.each(['/he/site-coming-soon', '/pt-br/site-coming-soon/', '/site-coming-soon/', '/HE/site-coming-soon'])('%s: mode off -> 404 no-store', async (p) => {
+    const f = dashboard(() => json(OFF));
+    const res = (await gate(req(p), f))!;
+    expect(res.status).toBe(404);
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  it('language-prefixed coming-soon with the mode on -> clean visitor rewrite; look-alikes untouched when off', async () => {
+    const on = dashboard(() => json(visitorAns()));
+    expect((await gate(req('/he/site-coming-soon', { headers: { 'x-tus-uc-variant': 'banner' } }), on))!.headers.get('x-middleware-request-x-tus-uc-variant')).toBe('split');
+    __resetSiteGateForTests();
+    const off = dashboard(() => json(OFF));
+    for (const p of ['/he/site-coming-soonx', '/hex/site-coming-soon', '/he/a/site-coming-soon']) expect(await gate(req(p), off)).toBeNull();
   });
 });

@@ -4,9 +4,11 @@
 // render and the first client render are empty, so there is no hydration mismatch) and render nothing on the
 // editor's /preview* pages or inside an iframe. Words come from the site (props), never from here.
 // Inline styles only (no Tailwind dependency); logical properties so RTL needs nothing.
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { VIEW_COOKIE, VIEW_PARAM } from './shared';
 
+/** Height of the bar in px, for a site's own fixed header: `top: var(--tus-site-gate-bar-h, 0px)`. */
+const BAR_VAR = '--tus-site-gate-bar-h';
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 const CHARCOAL = '#1A1A1A';
 const GOLD = '#C8981E';
@@ -82,10 +84,31 @@ export function SiteGateBar({ text, visitorViewLabel, settingsLabel, settingsUrl
   useEffect(() => {
     if (view === 'team') setVisitorHref(visitorViewHref());
   }, [view]);
-  if (view !== 'team') return null;
+  const barRef = useRef<HTMLDivElement | null>(null);
+  const shown = view === 'team';
+  useEffect(() => {
+    if (!shown) return;
+    const root = document.documentElement;
+    const el = barRef.current;
+    const publish = () => {
+      if (el) root.style.setProperty(BAR_VAR, `${Math.round(el.getBoundingClientRect().height)}px`);
+    };
+    publish();
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== 'undefined' && el) {
+      ro = new ResizeObserver(publish);
+      ro.observe(el);
+    }
+    return () => {
+      ro?.disconnect();
+      root.style.removeProperty(BAR_VAR);
+    };
+  }, [shown]);
+  if (!shown) return null;
   const link: CSSProperties = { color: '#fff', textDecoration: 'underline', textUnderlineOffset: 2 };
   return (
     <div
+      ref={barRef}
       data-site-gate-bar=""
       role="region"
       style={{
