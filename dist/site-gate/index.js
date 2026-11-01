@@ -77,7 +77,6 @@ async function sha256Hex(s) {
 }
 var TTL_MS = 5e3;
 var BACKOFF_MS = 5e3;
-var IDLE_AWAIT_MS = 6e4;
 var TIMEOUT_MS = 1e3;
 var LRU_CAP = 64;
 var FAILURE_LOG_INTERVAL_MS = 5 * 6e4;
@@ -205,16 +204,7 @@ async function getTokenless(domain, platformUrl, fetchImpl) {
   }
   const now = Date.now();
   const stale = now - e.at >= (e.lastOk ? TTL_MS : BACKOFF_MS);
-  if (e.answer) {
-    if (now - e.okAt >= IDLE_AWAIT_MS) {
-      if (!e.lastOk && !stale) return e.answer;
-      await refresh(e, domain, platformUrl, {}, fetchImpl, true);
-      return e.answer;
-    }
-    if (stale) void refresh(e, domain, platformUrl, {}, fetchImpl, true);
-    return e.answer;
-  }
-  if (!e.lastOk && !stale) return null;
+  if (!stale) return e.answer;
   await refresh(e, domain, platformUrl, {}, fetchImpl, true);
   return e.answer;
 }

@@ -542,20 +542,46 @@ describe('review round 1', () => {
     expect(f).toHaveBeenCalledTimes(2);
   });
 
-  it('6. an idle site (tokenless entry older than 60 s) awaits the refresh instead of serving the stale answer', async () => {
+  it('6. after the TTL the first tokenless request gets the NEW answer (mode flips on and off)', async () => {
     let on = true;
     const f = dashboard(() => json(on ? visitorAns() : OFF));
     expect((await gate(req('/'), f))!.status).toBe(503);
     on = false;
-    await vi.advanceTimersByTimeAsync(30_000); // stale but < 60 s: SWR serves the old answer
-    expect((await gate(req('/'), f))!.status).toBe(503);
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(5001);
+    expect(await gate(req('/'), f)).toBeNull();
     on = true;
-    await vi.advanceTimersByTimeAsync(61_000);
-    on = false;
-    // older than 60 s since the last success? the SWR refresh above succeeded, so go idle again
-    await vi.advanceTimersByTimeAsync(61_000);
-    expect(await gate(req('/'), f)).toBeNull(); // awaited: sees "off" at once
+    await vi.advanceTimersByTimeAsync(5001);
+    expect((await gate(req('/'), f))!.status).toBe(503);
+  });
+
+  it('6a. concurrent requests after the TTL share one fetch', async () => {
+    const f = dashboard(() => json(visitorAns()));
+    await gate(req('/'), f);
+    await vi.advanceTimersByTimeAsync(5001);
+    await Promise.all([gate(req('/a'), f), gate(req('/b'), f), gate(req('/c'), f)]);
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it('6c. dashboard down: at most one request waits per backoff window, the rest answer last-known at once', async () => {
+    let up = true;
+    const f = vi.fn((_u: unknown, init?: RequestInit) =>
+      up ? Promise.resolve(json(visitorAns())) : new Promise<Response>((_r, rej) => init?.signal?.addEventListener('abort', () => rej(new Error('a')))),
+    );
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await gate(req('/'), f as never);
+    up = false;
+    await vi.advanceTimersByTimeAsync(5001);
+    const first = gate(req('/'), f as never);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((await first)!.status).toBe(503); // waited the 1 s timeout, last-known
+    const calls = f.mock.calls.length;
+    for (let i = 0; i < 5; i++) expect((await gate(req('/'), f as never))!.status).toBe(503); // no wait: backing off
+    expect(f.mock.calls.length).toBe(calls);
+    await vi.advanceTimersByTimeAsync(5001);
+    const next = gate(req('/'), f as never); // next window: one waits again
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((await next)!.status).toBe(503);
+    expect(f.mock.calls.length).toBe(calls + 1);
   });
 
   it('6b. idle + dashboard down: the wait is bounded by 1 s and the last-known answer is served', async () => {

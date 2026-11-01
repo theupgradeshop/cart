@@ -1,4 +1,4 @@
-// Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.3; spec websites-o-p D5, council 2026-10-31).
+// Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.4; spec websites-o-p D5, council 2026-10-31).
 // Server-safe entry: NO 'use client', no React. Runs first in a site's middleware/proxy.
 //
 // siteGate(req, opts) -> Response | null.  null = "not gated, carry on" (mode off, skipped path, dashboard
@@ -110,7 +110,6 @@ async function sha256Hex(s: string): Promise<string> {
 
 const TTL_MS = 5_000;
 const BACKOFF_MS = 5_000;
-const IDLE_AWAIT_MS = 60_000;
 const TIMEOUT_MS = 1_000;
 const LRU_CAP = 64;
 const FAILURE_LOG_INTERVAL_MS = 5 * 60_000;
@@ -279,7 +278,7 @@ function refresh(
   return entry.inflight;
 }
 
-/** Tokenless: stale-while-revalidate, last-known kept through any outage. null = never known. */
+/** Tokenless: refresh awaited once the TTL is up (backoff after a failure), last-known kept through any outage. null = never known. */
 async function getTokenless(domain: string, platformUrl: string, fetchImpl: typeof fetch): Promise<SiteGateAnswer | null> {
   let e = tokenless.get(domain);
   if (!e) {
@@ -288,19 +287,10 @@ async function getTokenless(domain: string, platformUrl: string, fetchImpl: type
   }
   const now = Date.now();
   const stale = now - e.at >= (e.lastOk ? TTL_MS : BACKOFF_MS);
-  if (e.answer) {
-    if (now - e.okAt >= IDLE_AWAIT_MS) {
-      // Idle site: the last-known answer is old, so wait for the refresh (bounded by the 1 s timeout).
-      if (!e.lastOk && !stale) return e.answer; // already failed just now: back off
-      await refresh(e, domain, platformUrl, {}, fetchImpl, true);
-      return e.answer;
-    }
-    if (stale) void refresh(e, domain, platformUrl, {}, fetchImpl, true);
-    return e.answer;
-  }
-  if (!e.lastOk && !stale) return null; // backing off: do not pay the timeout on every request
+  if (!stale) return e.answer; // fresh, or backing off after a failure: last-known without waiting
+  // Older than the TTL: wait for the refresh (1 s timeout, in-flight shared), never serve the old answer first.
   await refresh(e, domain, platformUrl, {}, fetchImpl, true);
-  return e.answer;
+  return e.answer; // on failure this is the last-known answer (null on a cold start)
 }
 
 /** Token-bearing: answer valid for one TTL only (never served stale); null = unreachable / over the cap. */

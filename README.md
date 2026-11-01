@@ -500,7 +500,7 @@ void trackCompleteRegistration(`reg_course_${courseSlug}`, memberId);   // sign-
 The 24 h gate narrows a re-count from another browser; it does not close it. Owner-facing behaviour,
 per-site call points and gaps: `wiki/customer-websites/meta-pixel-conversion-events.md`.
 
-## Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.3)
+## Under-construction gate (`@upgradeshop/cart/site-gate`, v1.7.4)
 
 Spec: `knowledge/cowork/lead/plans/2026-10-31-websites-o-p-under-construction-and-sign-in-problems-SPEC.md` (D2-D5).
 The dashboard decides whether a site is "under construction"; this entry is the site-side gate that asks it and
@@ -542,7 +542,7 @@ and anything below it; `<path>-x` is gated.
 `{ on, view: 'visitor'|'team'|'preview', variant: 'centered'|'split'|'banner', businessName }`; `{ on: false }` is enough
 when off. Anything else (non-2xx, 429, timeout of 1 s, bad shape) = unreachable.
 
-**Cache:** one 5 s TTL keyed `(domain, sha256(token)|"")`. Tokenless answers: stale-while-revalidate, backoff,
+**Cache:** one 5 s TTL keyed `(domain, sha256(token)|"")`. Tokenless answers: after the TTL the refresh is awaited (1 s timeout), so a change takes effect within 5 s; backoff,
 in-flight dedupe, last-known kept through any outage (held outside the LRU so a flood of tokens cannot evict it).
 Token answers: valid for one TTL only, bounded LRU (64), negative answers cached. Only a 2xx with a valid body writes.
 Unreachable -> tokenless: last-known, else open (one `console.error`, then at most one per 5 min); token-bearing: the
