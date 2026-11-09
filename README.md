@@ -586,6 +586,61 @@ Inline styles with logical properties (RTL needs nothing). While the bar shows i
 `--tus-site-gate-bar-h` on `<html>` (ResizeObserver; removed on unmount or when no bar renders). A site with a fixed header
 offsets it with `top: var(--tus-site-gate-bar-h, 0px)`.
 
+## Cookie consent: drawing your own banner (`@upgradeshop/cart/consent`, v1.8.0)
+
+Headless: the package keeps the rules (region, storage, re-ask, loaders, withdrawal, cart events) and draws nothing.
+The site draws its own banner, settings panel and footer link from `useConsent()`. It is a subpath of this package on
+purpose: it registers with the same `@upgradeshop/cart/tracking` instance your cart events call, so Purchase and Lead
+fire only while MARKETING is on. Spec: `knowledge/cowork/lead/plans/2026-11-09-websites-cookie-consent-SPEC.md` (D1-D8).
+
+```tsx
+import { CookieConsentProvider, useConsent, useCookieSettingsLink, useConsentScripts } from '@upgradeshop/cart/consent';
+
+<CookieConsentProvider
+  storageKey="camoflash-cookie-consent"          // REQUIRED: the key the site's old banner used
+  legacyAcceptedMeans={['analytics', 'marketing']} // REQUIRED: what the old banner asked
+  config={snapshot}                                // server snapshot, see below
+  dashboardUrl="https://app.upgradeshop.ai"       // for the region call; absent = no call, ask first
+  hasNoticeWords                                   // true only if the site ships its own Notice words
+>
+```
+
+`config` = `{ regions: { europe, israel, rest }: 'ask' | 'notice', privacyPath, categoriesInUse: ('analytics' | 'marketing')[], googleAnalyticsId?, metaPixelId? }`
+(the dashboard `website-config` `cookieConsent` block plus the GA and pixel ids).
+
+`useConsent()` returns `{ ready, active, mode: 'ask' | 'notice', categories, choices, bannerOpen, settingsOpen, privacyPath, acceptAll, declineAll, save(choices), openSettings, closeSettings }`.
+`categories` are the categories that have a tool in use: draw one switch each. `choices` is what may run right now.
+`useCookieSettingsLink()` returns `{ visible, open }` for the footer link (no markup; `visible` is false where there is no banner).
+`useConsentScripts(items)` injects the public site scripts (`{ placement, content, category }`) whose category is allowed
+(`necessary` always, a null category counts as marketing); `injectConsentScripts` is the same without a hook.
+
+### What it does
+
+- **Region.** In the browser: `GET <dashboardUrl>/api/public/visitor-geo`, cut at 1.5 s, the answer kept in `sessionStorage` for the visit
+  (one call per visit). Europe = EU 27 + IS, LI, NO + GB + CH; `IL` = israel; any other country = rest. Unknown country, a failed, blocked
+  or timed-out call = **ask first** with the snapshot's categories, and the banner still draws. `ready` turns true when the answer (or its failure) is in.
+- **`active`** = at least one category in use, not inside an iframe, not on `/preview*`, and (Notice mode) the site supplied notice words.
+  When `active` is false draw nothing and render no footer link.
+- **Storage** at `storageKey`: `{ mode, asked, choices: { analytics, marketing }, at }`. An old `"accepted"` turns on exactly the categories in
+  `legacyAcceptedMeans` (the rest off); an old `"declined"` turns all off; both count as asked for exactly those categories.
+- **Re-ask.** The banner shows again only for a category in use that is not in `asked`, or when the stored mode was Notice and this visit is Ask.
+  An older explicit off stays off. In an Ask region nothing new runs until the visitor answers (a stored Notice choice does not carry over to an Ask region).
+- **Notice mode.** The tools run from the first visit unless the stored choice turned them off; `bannerOpen` is still true until the visitor presses OK (`acceptAll()`).
+- **Loaders.** Meta Pixel (autoConfig off before init, nothing on `/s/*`, `/g/*` or a page whose query carries such an address), Google Analytics (gtag) and site scripts run only while their category is allowed.
+- **Withdrawal.** Any category going from on to off clears its cookies on the host and parent domains (analytics `_ga`, `_ga_*`, `_gid`; marketing `_fbp`, `_fbc`) and reloads the page.
+- **Cart events.** Purchase, Lead and CompleteRegistration use `configureTracking` with `hasConsent` = marketing allowed and `hasDeclined` = marketing explicitly declined.
+- **Notice words guard.** A Notice banner without its own words is refused: when the visitor's mode is `notice` and `hasNoticeWords` is not true, the provider is inactive
+  (`active=false`, no banner, no loader runs) and logs one `console.error`. Ask-region visitors are unaffected.
+- No floating button. The only ways back are the footer "Cookie settings" link (`useCookieSettingsLink`) and the banner's own settings link.
+
+### Rules for the banner you draw (tests on the site must assert them)
+
+- **Ask mode: Decline equals Accept.** "Accept" and "Decline" sit on the same row and have the same size (same Brand Hub size, the same prominence). The site's test renders the
+  ask banner and asserts both buttons share a row and `data-btn-size`. A third "Cookie settings" link and the privacy link are allowed beside them.
+- **Notice mode:** a short notice that says plainly what is measured, an OK button, and a **Cookie settings control that is a real, visible button or link at least the size of the notice text** (not an icon, not smaller text). No Decline button.
+- **Words.** Ask, Notice and per-category words are the site's own site words in every language it serves; never reuse the Ask words for a Notice banner.
+- **`storageKey` and `legacyAcceptedMeans` are set per site** from what its old banner stored and asked: template and howhippie = `['marketing']` (pixel only); Camoflash, HIC and bomdia.upgradeu.ai = `['analytics', 'marketing']`; honeydew and new Bomdia are confirmed by their seats from their live banner words.
+
 ## Development
 
 ```bash

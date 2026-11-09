@@ -79,4 +79,17 @@ export default defineConfig([
       js: "'use client';",
     },
   },
+  {
+    // Headless cookie consent: 'use client'. `@upgradeshop/cart/tracking` stays EXTERNAL so the consent code registers
+    // with the very same tracking module instance the site's cart events call (a bundled copy would never fire).
+    entry: ['src/consent/index.tsx'],
+    outDir: 'dist/consent',
+    format: ['cjs', 'esm'],
+    dts: true,
+    clean: false,
+    external: ['react', 'react-dom', 'next', '@upgradeshop/cart/tracking'],
+    banner: {
+      js: "'use client';",
+    },
+  },
 ]);

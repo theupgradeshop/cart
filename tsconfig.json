@@ -9,7 +9,8 @@
     "declaration": true,
     "declarationMap": true,
     "outDir": "dist",
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": { "@upgradeshop/cart/tracking": ["./src/tracking/index.ts"] }
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist", "tests"]
