@@ -619,6 +619,7 @@ import { CookieConsentProvider, useConsent, useCookieSettingsLink, useConsentScr
 - **Region.** In the browser: `GET <dashboardUrl>/api/public/visitor-geo`, cut at 1.5 s, the answer kept in `sessionStorage` for the visit
   (one call per visit). Europe = EU 27 + IS, LI, NO + GB + CH; `IL` = israel; any other country = rest. Unknown country, a failed, blocked
   or timed-out call = **ask first** with the snapshot's categories, and the banner still draws. `ready` turns true when the answer (or its failure) is in.
+- **Staging country override.** A page URL with `?ck_country=<CC>` (2 ASCII letters; anything else is ignored) is forwarded as `?ck_country=<CC>` on the visitor-geo call and the `sessionStorage` cache is neither read nor written, so countries can be switched while testing. The dashboard honours it only when its `USE_STAGING_DOMAINS` is `"true"`; production ignores it.
 - **`active`** = at least one category in use, not inside an iframe, not on `/preview*`, and (Notice mode) the site supplied notice words.
   When `active` is false draw nothing and render no footer link.
 - **Storage** at `storageKey`: `{ mode, asked, choices: { analytics, marketing }, at }`. An old `"accepted"` turns on exactly the categories in

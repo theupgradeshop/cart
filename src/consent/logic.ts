@@ -205,12 +205,28 @@ export function isEmbeddedOrPreview(): boolean {
 export const GEO_TIMEOUT_MS = 1500;
 
 /**
- * `GET <dashboardUrl>/api/public/visitor-geo` with a hard 1.5 s timeout; the answer is kept in sessionStorage for the
+ * The page's `?ck_country=<CC>` (2 ASCII letters, upper-cased) or null. The dashboard honours it only on staging
+ * (USE_STAGING_DOMAINS=true); production ignores it. Anything else is never forwarded.
+ */
+function countryOverride(): string | null {
+  try {
+    const v = new URLSearchParams(window.location.search).get('ck_country');
+    return v !== null && /^[A-Za-z]{2}$/.test(v) ? v.toUpperCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `GET <dashboardUrl>/api/public/visitor-geo` (plus `?ck_country=<CC>` when the page carries a valid override; then the
+ * sessionStorage cache is neither read nor written) with a hard 1.5 s timeout; the answer is kept in sessionStorage for the
  * visit (one call per visit). Any failure, block or timeout -> null (ask first). Failures are not cached.
  */
 export async function fetchCountry(dashboardUrl: string | undefined, storageKey: string): Promise<string | null> {
   const cacheKey = `${storageKey}:geo`;
+  const override = countryOverride();
   try {
+    if (override) throw new Error('override: skip the cache');
     const cached = window.sessionStorage.getItem(cacheKey);
     if (cached !== null) {
       const parsed = JSON.parse(cached) as { country?: unknown };
@@ -229,7 +245,7 @@ export async function fetchCountry(dashboardUrl: string | undefined, storageKey:
     }, GEO_TIMEOUT_MS);
   });
   const call = (async () => {
-    const res = await fetch(`${dashboardUrl.replace(/\/+$/, '')}/api/public/visitor-geo`, {
+    const res = await fetch(`${dashboardUrl.replace(/\/+$/, '')}/api/public/visitor-geo${override ? `?ck_country=${override}` : ''}`, {
       method: 'GET',
       cache: 'no-store',
       signal: controller.signal,
@@ -241,6 +257,7 @@ export async function fetchCountry(dashboardUrl: string | undefined, storageKey:
   const result = await Promise.race([call, timeout]);
   if (timer) clearTimeout(timer);
   if (result === undefined || (result === null && controller.signal.aborted)) return null;
+  if (override) return result;
   try {
     window.sessionStorage.setItem(cacheKey, JSON.stringify({ country: result }));
   } catch {

@@ -277,6 +277,48 @@ describe('unknown country, blocked or slow region call', () => {
   });
 });
 
+describe('ck_country staging override', () => {
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('forwards ck_country=DE and caches nothing', async () => {
+    window.history.replaceState(null, '', '/?ck_country=DE');
+    const fn = geo('DE');
+    await mount();
+    expect(fn.mock.calls[0][0]).toBe('https://app.example.test/api/public/visitor-geo?ck_country=DE');
+    expect(window.sessionStorage.getItem(`${KEY}:geo`)).toBeNull();
+  });
+
+  it('ignores a cached answer while the override is present', async () => {
+    window.sessionStorage.setItem(`${KEY}:geo`, JSON.stringify({ country: 'IL' }));
+    window.history.replaceState(null, '', '/?ck_country=fr');
+    const fn = geo('FR');
+    await mount();
+    expect(fn.mock.calls[0][0]).toBe('https://app.example.test/api/public/visitor-geo?ck_country=FR');
+    expect(api.mode).toBe('ask');
+  });
+
+  it('no param keeps today behaviour (plain URL, cached)', async () => {
+    const fn = geo('IL');
+    await mount();
+    expect(fn.mock.calls[0][0]).toBe('https://app.example.test/api/public/visitor-geo');
+    expect(window.sessionStorage.getItem(`${KEY}:geo`)).not.toBeNull();
+  });
+
+  it('an invalid value is not forwarded', async () => {
+    for (const bad of ['DEU', 'D1', '1', '']) {
+      window.sessionStorage.clear();
+      window.history.replaceState(null, '', `/?ck_country=${bad}`);
+      const fn = geo('IL');
+      const m = await mount();
+      expect(fn.mock.calls[0][0]).toBe('https://app.example.test/api/public/visitor-geo');
+      expect(window.sessionStorage.getItem(`${KEY}:geo`)).not.toBeNull();
+      m.unmount();
+    }
+  });
+});
+
 describe('sessionStorage reuse', () => {
   it('one call per visit', async () => {
     const fn = geo('IL');

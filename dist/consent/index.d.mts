@@ -62,7 +62,8 @@ declare const pageActions: {
 declare function isEmbeddedOrPreview(): boolean;
 declare const GEO_TIMEOUT_MS = 1500;
 /**
- * `GET <dashboardUrl>/api/public/visitor-geo` with a hard 1.5 s timeout; the answer is kept in sessionStorage for the
+ * `GET <dashboardUrl>/api/public/visitor-geo` (plus `?ck_country=<CC>` when the page carries a valid override; then the
+ * sessionStorage cache is neither read nor written) with a hard 1.5 s timeout; the answer is kept in sessionStorage for the
  * visit (one call per visit). Any failure, block or timeout -> null (ask first). Failures are not cached.
  */
 declare function fetchCountry(dashboardUrl: string | undefined, storageKey: string): Promise<string | null>;

@@ -157,9 +157,19 @@ function isEmbeddedOrPreview() {
   }
 }
 var GEO_TIMEOUT_MS = 1500;
+function countryOverride() {
+  try {
+    const v = new URLSearchParams(window.location.search).get("ck_country");
+    return v !== null && /^[A-Za-z]{2}$/.test(v) ? v.toUpperCase() : null;
+  } catch {
+    return null;
+  }
+}
 async function fetchCountry(dashboardUrl, storageKey) {
   const cacheKey = `${storageKey}:geo`;
+  const override = countryOverride();
   try {
+    if (override) throw new Error("override: skip the cache");
     const cached = window.sessionStorage.getItem(cacheKey);
     if (cached !== null) {
       const parsed = JSON.parse(cached);
@@ -177,7 +187,7 @@ async function fetchCountry(dashboardUrl, storageKey) {
     }, GEO_TIMEOUT_MS);
   });
   const call = (async () => {
-    const res = await fetch(`${dashboardUrl.replace(/\/+$/, "")}/api/public/visitor-geo`, {
+    const res = await fetch(`${dashboardUrl.replace(/\/+$/, "")}/api/public/visitor-geo${override ? `?ck_country=${override}` : ""}`, {
       method: "GET",
       cache: "no-store",
       signal: controller.signal
@@ -189,6 +199,7 @@ async function fetchCountry(dashboardUrl, storageKey) {
   const result = await Promise.race([call, timeout]);
   if (timer) clearTimeout(timer);
   if (result === void 0 || result === null && controller.signal.aborted) return null;
+  if (override) return result;
   try {
     window.sessionStorage.setItem(cacheKey, JSON.stringify({ country: result }));
   } catch {
