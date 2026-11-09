@@ -50,6 +50,18 @@ export function onCapabilityPage(): boolean {
   return isCapabilityPath(window.location.pathname) || searchCarriesCapability(window.location.search);
 }
 
+/** True when a history target (as given to pushState / replaceState) is a capability address on this origin. */
+export function isCapabilityUrl(target: string | URL | null | undefined): boolean {
+  if (target === null || target === undefined) return false;
+  try {
+    const u = new URL(String(target), window.location.href);
+    if (u.origin !== window.location.origin) return false;
+    return isCapabilityPath(u.pathname) || searchCarriesCapability(u.search);
+  } catch {
+    return false;
+  }
+}
+
 /** True once a pixel, GA or a site script was loaded in this page-life (only a full reload takes them away). */
 export function consentToolsLoaded(): boolean {
   return (window as unknown as { __tusConsentLoaded?: boolean }).__tusConsentLoaded === true;
@@ -58,7 +70,7 @@ function markLoaded(): void {
   (window as unknown as { __tusConsentLoaded?: boolean }).__tusConsentLoaded = true;
 }
 
-type Win = Window & { fbq?: unknown; dataLayer?: unknown[]; gtag?: (...a: unknown[]) => void; __tusConsentGa?: string };
+type Win = Window & { __tusConsentPixel?: boolean; fbq?: unknown; dataLayer?: unknown[]; gtag?: (...a: unknown[]) => void; __tusConsentGa?: string };
 
 /** Meta Pixel: `autoConfig` off BEFORE init (no click hrefs / page metadata sent), then PageView. Returns true if started. */
 export function loadMetaPixel(pixelId: string | null | undefined): boolean {
@@ -70,6 +82,9 @@ export function loadMetaPixel(pixelId: string | null | undefined): boolean {
     if (n.callMethod) n.callMethod.apply(n, args);
     else n.queue.push(args);
   };
+  // the pixel must never track history changes itself (it would send the new address, even a capability one):
+  // the package sends PageView on route changes (`sendMetaPageView`). Set before fbevents.js is added.
+  n.disablePushState = true;
   f.fbq = n;
   if (!f._fbq) f._fbq = n;
   n.push = n;
@@ -83,7 +98,16 @@ export function loadMetaPixel(pixelId: string | null | undefined): boolean {
   n('set', 'autoConfig', false, pixelId);
   n('init', pixelId);
   n('track', 'PageView');
+  w.__tusConsentPixel = true;
   markLoaded();
+  return true;
+}
+
+/** One manual Meta PageView for the current address. No-op when the pixel is not ours or on a capability page. */
+export function sendMetaPageView(): boolean {
+  const w = window as Win;
+  if (!w.__tusConsentPixel || typeof w.fbq !== 'function' || onCapabilityPage()) return false;
+  (w.fbq as (...a: unknown[]) => void)('track', 'PageView');
   return true;
 }
 
@@ -117,7 +141,7 @@ export function sendGaPageView(): boolean {
   const w = window as Win;
   if (!w.__tusConsentGa || typeof w.gtag !== 'function' || onCapabilityPage()) return false;
   w.gtag('event', 'page_view', {
-    page_location: window.location.href,
+    page_location: window.location.href.split('#')[0], // never the hash
     page_path: window.location.pathname + window.location.search,
     page_title: document.title,
     send_to: w.__tusConsentGa,

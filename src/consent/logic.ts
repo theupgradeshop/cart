@@ -180,9 +180,11 @@ export function clearCategoryCookies(category: ConsentCategory): void {
   }
 }
 
-/** Page-level actions behind an object so a test can watch the reload. */
+/** Page-level actions behind an object so a test can watch the reload and the hard navigation. */
 export const pageActions = {
   reload: () => window.location.reload(),
+  /** A hard navigation (the page is replaced, nothing of the old document keeps running). */
+  assign: (url: string) => window.location.assign(url),
 };
 
 // ---- environment ---------------------------------------------------------------------------------------------------

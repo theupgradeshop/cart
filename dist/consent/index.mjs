@@ -143,7 +143,9 @@ function clearCategoryCookies(category) {
   }
 }
 var pageActions = {
-  reload: () => window.location.reload()
+  reload: () => window.location.reload(),
+  /** A hard navigation (the page is replaced, nothing of the old document keeps running). */
+  assign: (url) => window.location.assign(url)
 };
 function isEmbeddedOrPreview() {
   if (typeof window === "undefined") return true;
@@ -232,6 +234,16 @@ function searchCarriesCapability(search) {
 function onCapabilityPage() {
   return isCapabilityPath(window.location.pathname) || searchCarriesCapability(window.location.search);
 }
+function isCapabilityUrl(target) {
+  if (target === null || target === void 0) return false;
+  try {
+    const u = new URL(String(target), window.location.href);
+    if (u.origin !== window.location.origin) return false;
+    return isCapabilityPath(u.pathname) || searchCarriesCapability(u.search);
+  } catch {
+    return false;
+  }
+}
 function consentToolsLoaded() {
   return window.__tusConsentLoaded === true;
 }
@@ -247,6 +259,7 @@ function loadMetaPixel(pixelId) {
     if (n.callMethod) n.callMethod.apply(n, args);
     else n.queue.push(args);
   };
+  n.disablePushState = true;
   f.fbq = n;
   if (!f._fbq) f._fbq = n;
   n.push = n;
@@ -260,7 +273,14 @@ function loadMetaPixel(pixelId) {
   n("set", "autoConfig", false, pixelId);
   n("init", pixelId);
   n("track", "PageView");
+  w.__tusConsentPixel = true;
   markLoaded();
+  return true;
+}
+function sendMetaPageView() {
+  const w = window;
+  if (!w.__tusConsentPixel || typeof w.fbq !== "function" || onCapabilityPage()) return false;
+  w.fbq("track", "PageView");
   return true;
 }
 function loadGoogleAnalytics(gaId) {
@@ -286,7 +306,8 @@ function sendGaPageView() {
   const w = window;
   if (!w.__tusConsentGa || typeof w.gtag !== "function" || onCapabilityPage()) return false;
   w.gtag("event", "page_view", {
-    page_location: window.location.href,
+    page_location: window.location.href.split("#")[0],
+    // never the hash
     page_path: window.location.pathname + window.location.search,
     page_title: document.title,
     send_to: w.__tusConsentGa
@@ -443,6 +464,7 @@ function CookieConsentProvider(props) {
       return;
     }
     sendGaPageView();
+    sendMetaPageView();
   }, [address, active, ready]);
   useEffect(() => {
     if (!active || !ready) return;
@@ -519,6 +541,10 @@ function useAddress() {
       for (const name of ["pushState", "replaceState"]) {
         const original = window.history[name];
         window.history[name] = function(...args) {
+          if (consentToolsLoaded() && isCapabilityUrl(args[2])) {
+            pageActions.assign(new URL(String(args[2]), window.location.href).href);
+            return;
+          }
           const result = original.apply(this, args);
           window.dispatchEvent(new Event("tus-consent-navigate"));
           return result;
@@ -559,6 +585,7 @@ export {
   resolveMode,
   scriptCategory,
   sendGaPageView,
+  sendMetaPageView,
   useConsent,
   useConsentScripts,
   useCookieSettingsLink,

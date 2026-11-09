@@ -27,10 +27,12 @@ import {
 import {
   injectConsentScripts,
   consentToolsLoaded,
+  isCapabilityUrl,
   loadGoogleAnalytics,
   loadMetaPixel,
   onCapabilityPage,
   sendGaPageView,
+  sendMetaPageView,
   type ConsentScriptItem,
 } from './loaders';
 
@@ -39,6 +41,7 @@ export {
   injectConsentScripts,
   consentToolsLoaded,
   sendGaPageView,
+  sendMetaPageView,
   loadGoogleAnalytics,
   loadMetaPixel,
   scriptCategory,
@@ -181,7 +184,9 @@ export function CookieConsentProvider(props: CookieConsentProviderProps) {
     if (choices.marketing) loadMetaPixel(config.metaPixelId);
   }, [active, ready, choices.analytics, choices.marketing, config.googleAnalyticsId, config.metaPixelId]);
 
-  // route changes: a manual GA page_view off capability pages; a full reload when a tool is live and the new page is a capability page
+  // route changes: manual GA page_view + Meta PageView off capability pages. A soft navigation onto a capability page is
+  // stopped earlier (the history patch below hard-navigates BEFORE the address changes); only a back/forward (popstate)
+  // gets here, and it can't be cancelled, so it reloads.
   const address = useAddress();
   const lastAddress = useRef(address);
   useEffect(() => {
@@ -193,6 +198,7 @@ export function CookieConsentProvider(props: CookieConsentProviderProps) {
       return;
     }
     sendGaPageView();
+    sendMetaPageView();
   }, [address, active, ready]);
 
   // a category the visitor explicitly turned off never keeps its cookies, even ones written just before a reload
@@ -285,6 +291,12 @@ function useAddress(): string {
       for (const name of ['pushState', 'replaceState'] as const) {
         const original = window.history[name];
         window.history[name] = function (this: History, ...args: Parameters<History['pushState']>) {
+          // a capability target while a tool or site script is live: leave through a hard navigation BEFORE the history
+          // change, so no tool (pixel, GA, site script) ever sees the address. Nothing loaded = nothing to leak.
+          if (consentToolsLoaded() && isCapabilityUrl(args[2])) {
+            pageActions.assign(new URL(String(args[2]), window.location.href).href);
+            return;
+          }
           const result = original.apply(this, args);
           window.dispatchEvent(new Event('tus-consent-navigate'));
           return result;

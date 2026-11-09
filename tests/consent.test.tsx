@@ -82,7 +82,14 @@ function store(value: unknown) {
   window.localStorage.setItem(KEY, typeof value === 'string' ? value : JSON.stringify(value));
 }
 
+// the browser's own history methods, taken before any test mounts the provider (which wraps them once per page)
+const NATIVE_PUSH = window.history.pushState;
+const NATIVE_REPLACE = window.history.replaceState;
+
 beforeEach(() => {
+  window.history.pushState = NATIVE_PUSH;
+  window.history.replaceState = NATIVE_REPLACE;
+  delete (window as any).__tusConsentHistoryPatched;
   window.history.replaceState({}, '', '/');
   window.localStorage.clear();
   window.sessionStorage.clear();
@@ -90,6 +97,7 @@ beforeEach(() => {
   document.body.innerHTML = '';
   for (const k of ['fbq', '_fbq', 'gtag', 'dataLayer', '__tusConsentGa', '__tusConsentScripts', '__tusConsentLoaded']) delete (window as any)[k];
   vi.spyOn(pageActions, 'reload').mockImplementation(() => {});
+  vi.spyOn(pageActions, 'assign').mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -689,24 +697,103 @@ describe('route changes after load', () => {
     expect(pageActions.reload).not.toHaveBeenCalled();
   });
 
-  it('soft navigation to a capability page after GA loaded: no page_view with /s/ and a reload', async () => {
+  it('pushState to a capability page after GA loaded: hard navigation, original pushState not called, no page_view with /s/', async () => {
     window.history.replaceState({}, '', '/about');
+    const original = vi.spyOn(window.history, 'pushState');
     geo('IL');
     await mount();
     const before = pageViews().length;
     act(() => window.history.pushState({}, '', '/s/abc'));
+    expect(pageActions.assign).toHaveBeenCalledTimes(1);
+    expect(pageActions.assign).toHaveBeenCalledWith(window.location.origin + '/s/abc');
+    expect(original).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe('/about');
     expect(pageViews()).toHaveLength(before);
-    expect(JSON.stringify((window as any).dataLayer)).not.toContain('/s/abc');
-    expect(pageActions.reload).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify((window as any).dataLayer)).not.toContain('/s/');
+    expect(((window as any).fbq.queue as unknown[][]).map((a) => Array.from(a as any[]).join('|')).join(';')).not.toContain('/s/');
+    expect(pageActions.reload).not.toHaveBeenCalled();
   });
 
-  it('nothing is reloaded when no tool was loaded', async () => {
+  it('replaceState to a capability page after a tool loaded is also a hard navigation', async () => {
     window.history.replaceState({}, '', '/about');
+    const original = vi.spyOn(window.history, 'replaceState');
+    geo('IL');
+    await mount();
+    original.mockClear();
+    act(() => window.history.replaceState({}, '', '/he/g/code'));
+    expect(pageActions.assign).toHaveBeenCalledTimes(1);
+    expect(original).not.toHaveBeenCalled();
+  });
+
+  it('pushState with a query that carries a capability is a hard navigation too', async () => {
+    window.history.replaceState({}, '', '/about');
+    geo('IL');
+    await mount();
+    act(() => window.history.pushState({}, '', '/page?booking=' + 'a'.repeat(32)));
+    expect(pageActions.assign).toHaveBeenCalledTimes(1);
+  });
+
+  it('pushState to a normal page calls the original', async () => {
+    window.history.replaceState({}, '', '/about');
+    const original = vi.spyOn(window.history, 'pushState');
+    geo('IL');
+    await mount();
+    act(() => window.history.pushState({}, '', '/about'));
+    expect(original).toHaveBeenCalledTimes(1);
+    expect(pageActions.assign).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe('/about');
+  });
+
+  it('popstate into a capability page cannot be cancelled: it still reloads', async () => {
+    window.history.replaceState({}, '', '/about');
+    geo('IL');
+    await mount();
+    NATIVE_REPLACE.call(window.history, {}, '', '/s/abc');
+    act(() => {
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    expect(pageActions.reload).toHaveBeenCalledTimes(1);
+    expect(pageActions.assign).not.toHaveBeenCalled();
+  });
+
+  it('with no tool loaded, pushState to a capability page stays a soft navigation', async () => {
+    window.history.replaceState({}, '', '/about');
+    const original = vi.spyOn(window.history, 'pushState');
     geo('DE');
     await mount();
     expect(consentToolsLoaded()).toBe(false);
     act(() => window.history.pushState({}, '', '/s/abc'));
+    expect(original).toHaveBeenCalledTimes(1);
+    expect(window.location.pathname).toBe('/s/abc');
+    expect(pageActions.assign).not.toHaveBeenCalled();
     expect(pageActions.reload).not.toHaveBeenCalled();
+  });
+
+  it('GA page_location carries no hash', async () => {
+    window.history.replaceState({}, '', '/about?x=1#secret-part');
+    geo('IL');
+    await mount();
+    act(() => window.history.pushState({}, '', '/contact#frag'));
+    const views = pageViews();
+    expect(views).toHaveLength(2);
+    for (const v of views) {
+      expect(v[2].page_location).not.toContain('#');
+      expect(JSON.stringify(v[2])).not.toContain('secret-part');
+      expect(JSON.stringify(v[2])).not.toContain('frag');
+    }
+    expect(views[1][2].page_location).toBe(window.location.origin + '/contact');
+  });
+
+  it('Meta Pixel: its own history tracking is off, and the package sends PageView per normal route change only', async () => {
+    window.history.replaceState({}, '', '/about');
+    geo('IL');
+    await mount();
+    const calls = () => ((window as any).fbq.queue as unknown[][]).map((a) => Array.from(a as any[]).slice(0, 2).join('|'));
+    expect(calls().filter((c) => c === 'track|PageView')).toHaveLength(1);
+    act(() => window.history.pushState({}, '', '/contact'));
+    expect(calls().filter((c) => c === 'track|PageView')).toHaveLength(2);
+    act(() => window.history.pushState({}, '', '/s/abc'));
+    expect(calls().filter((c) => c === 'track|PageView')).toHaveLength(2);
   });
 });
 
@@ -724,6 +811,18 @@ describe('loaders', () => {
     expect(loadMetaPixel('123456789')).toBe(false);
     expect((window as any).fbq).toBeUndefined();
     expect(loadGoogleAnalytics('G-ABC123')).toBe(false);
+  });
+
+  it('fbq.disablePushState is true before the fbevents script tag is added', async () => {
+    const seen: unknown[] = [];
+    const add = Node.prototype.appendChild;
+    vi.spyOn(document.head, 'appendChild').mockImplementation(function (this: Node, node: any) {
+      if (node?.src?.includes('connect.facebook.net')) seen.push((window as any).fbq?.disablePushState);
+      return add.call(this, node) as any;
+    } as any);
+    geo('IL');
+    await mount();
+    expect(seen).toEqual([true]);
   });
 
   it('Meta Pixel call order', async () => {

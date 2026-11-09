@@ -52,9 +52,11 @@ declare function explicitlyDeclined(stored: StoredConsent | null, category: Cons
 declare function cookieDomainCandidates(host: string): string[];
 /** Expires the category's cookies for the current host and every parent domain, path `/`. */
 declare function clearCategoryCookies(category: ConsentCategory): void;
-/** Page-level actions behind an object so a test can watch the reload. */
+/** Page-level actions behind an object so a test can watch the reload and the hard navigation. */
 declare const pageActions: {
     reload: () => void;
+    /** A hard navigation (the page is replaced, nothing of the old document keeps running). */
+    assign: (url: string) => void;
 };
 /** The page editor shows the site in an iframe and /preview is editor chrome, not a visit: nothing renders or loads. */
 declare function isEmbeddedOrPreview(): boolean;
@@ -69,6 +71,8 @@ declare function fetchCountry(dashboardUrl: string | undefined, storageKey: stri
 declare function consentToolsLoaded(): boolean;
 /** Meta Pixel: `autoConfig` off BEFORE init (no click hrefs / page metadata sent), then PageView. Returns true if started. */
 declare function loadMetaPixel(pixelId: string | null | undefined): boolean;
+/** One manual Meta PageView for the current address. No-op when the pixel is not ours or on a capability page. */
+declare function sendMetaPageView(): boolean;
 /** Google Analytics (gtag.js). Returns true if started. */
 declare function loadGoogleAnalytics(gaId: string | null | undefined): boolean;
 /** One manual GA page_view for the current address. No-op when GA is not running or on a capability page. */
@@ -141,4 +145,4 @@ declare function CookieConsentProvider(props: CookieConsentProviderProps): react
  */
 declare function useConsentScripts(items: ConsentScriptItem[] | null | undefined): void;
 
-export { CATEGORIES, CONSENT_CHANGE_EVENT, type ConsentCategory, type ConsentChoices, type ConsentConfig, type ConsentMode, type ConsentScriptItem, type ConsentState, CookieConsentProvider, type CookieConsentProviderProps, GEO_TIMEOUT_MS, type RegionGroup, type StoredConsent, bannerNeeded, clearCategoryCookies, consentToolsLoaded, cookieDomainCandidates, effectiveChoices, explicitlyDeclined, fetchCountry, inUse, injectConsentScripts, isEmbeddedOrPreview, loadGoogleAnalytics, loadMetaPixel, pageActions, readStored, regionGroupOf, resolveMode, scriptCategory, sendGaPageView, useConsent, useConsentScripts, useCookieSettingsLink, writeStored };
+export { CATEGORIES, CONSENT_CHANGE_EVENT, type ConsentCategory, type ConsentChoices, type ConsentConfig, type ConsentMode, type ConsentScriptItem, type ConsentState, CookieConsentProvider, type CookieConsentProviderProps, GEO_TIMEOUT_MS, type RegionGroup, type StoredConsent, bannerNeeded, clearCategoryCookies, consentToolsLoaded, cookieDomainCandidates, effectiveChoices, explicitlyDeclined, fetchCountry, inUse, injectConsentScripts, isEmbeddedOrPreview, loadGoogleAnalytics, loadMetaPixel, pageActions, readStored, regionGroupOf, resolveMode, scriptCategory, sendGaPageView, sendMetaPageView, useConsent, useConsentScripts, useCookieSettingsLink, writeStored };
