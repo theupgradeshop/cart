@@ -26,14 +26,19 @@ import {
 } from './logic';
 import {
   injectConsentScripts,
+  consentToolsLoaded,
   loadGoogleAnalytics,
   loadMetaPixel,
+  onCapabilityPage,
+  sendGaPageView,
   type ConsentScriptItem,
 } from './loaders';
 
 export * from './logic';
 export {
   injectConsentScripts,
+  consentToolsLoaded,
+  sendGaPageView,
   loadGoogleAnalytics,
   loadMetaPixel,
   scriptCategory,
@@ -176,6 +181,20 @@ export function CookieConsentProvider(props: CookieConsentProviderProps) {
     if (choices.marketing) loadMetaPixel(config.metaPixelId);
   }, [active, ready, choices.analytics, choices.marketing, config.googleAnalyticsId, config.metaPixelId]);
 
+  // route changes: a manual GA page_view off capability pages; a full reload when a tool is live and the new page is a capability page
+  const address = useAddress();
+  const lastAddress = useRef(address);
+  useEffect(() => {
+    if (lastAddress.current === address) return;
+    lastAddress.current = address;
+    if (!active || !ready || isEmbeddedOrPreview()) return;
+    if (onCapabilityPage()) {
+      if (consentToolsLoaded()) pageActions.reload();
+      return;
+    }
+    sendGaPageView();
+  }, [address, active, ready]);
+
   // a category the visitor explicitly turned off never keeps its cookies, even ones written just before a reload
   useEffect(() => {
     if (!active || !ready) return;
@@ -248,8 +267,38 @@ export function CookieConsentProvider(props: CookieConsentProviderProps) {
  */
 export function useConsentScripts(items: ConsentScriptItem[] | null | undefined): void {
   const { active, ready, choices } = useConsent();
+  const address = useAddress();
   useEffect(() => {
     if (isEmbeddedOrPreview()) return;
     injectConsentScripts(items, active && ready ? choices : OFF);
-  }, [items, active, ready, choices]);
+  }, [items, active, ready, choices, address]);
+}
+
+/** The current path + query, re-read on back/forward and on client-side navigation (history.pushState / replaceState). */
+function useAddress(): string {
+  const read = () => (typeof window === 'undefined' ? '' : window.location.pathname + window.location.search);
+  const [address, setAddress] = useState(read);
+  useEffect(() => {
+    const w = window as unknown as { __tusConsentHistoryPatched?: boolean };
+    if (!w.__tusConsentHistoryPatched) {
+      w.__tusConsentHistoryPatched = true;
+      for (const name of ['pushState', 'replaceState'] as const) {
+        const original = window.history[name];
+        window.history[name] = function (this: History, ...args: Parameters<History['pushState']>) {
+          const result = original.apply(this, args);
+          window.dispatchEvent(new Event('tus-consent-navigate'));
+          return result;
+        };
+      }
+    }
+    const update = () => setAddress(read());
+    window.addEventListener('popstate', update);
+    window.addEventListener('tus-consent-navigate', update);
+    update();
+    return () => {
+      window.removeEventListener('popstate', update);
+      window.removeEventListener('tus-consent-navigate', update);
+    };
+  }, []);
+  return address;
 }

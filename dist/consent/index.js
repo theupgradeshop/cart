@@ -28,6 +28,7 @@ __export(index_exports, {
   GEO_TIMEOUT_MS: () => GEO_TIMEOUT_MS,
   bannerNeeded: () => bannerNeeded,
   clearCategoryCookies: () => clearCategoryCookies,
+  consentToolsLoaded: () => consentToolsLoaded,
   cookieDomainCandidates: () => cookieDomainCandidates,
   effectiveChoices: () => effectiveChoices,
   explicitlyDeclined: () => explicitlyDeclined,
@@ -42,6 +43,7 @@ __export(index_exports, {
   regionGroupOf: () => regionGroupOf,
   resolveMode: () => resolveMode,
   scriptCategory: () => scriptCategory,
+  sendGaPageView: () => sendGaPageView,
   useConsent: () => useConsent,
   useConsentScripts: () => useConsentScripts,
   useCookieSettingsLink: () => useCookieSettingsLink,
@@ -278,6 +280,12 @@ function searchCarriesCapability(search) {
 function onCapabilityPage() {
   return isCapabilityPath(window.location.pathname) || searchCarriesCapability(window.location.search);
 }
+function consentToolsLoaded() {
+  return window.__tusConsentLoaded === true;
+}
+function markLoaded() {
+  window.__tusConsentLoaded = true;
+}
 function loadMetaPixel(pixelId) {
   if (!pixelId || !PIXEL_ID.test(pixelId) || onCapabilityPage()) return false;
   const w = window;
@@ -300,6 +308,7 @@ function loadMetaPixel(pixelId) {
   n("set", "autoConfig", false, pixelId);
   n("init", pixelId);
   n("track", "PageView");
+  markLoaded();
   return true;
 }
 function loadGoogleAnalytics(gaId) {
@@ -316,7 +325,20 @@ function loadGoogleAnalytics(gaId) {
   s.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(gaId)}`;
   (document.head || document.documentElement).appendChild(s);
   w.gtag("js", /* @__PURE__ */ new Date());
-  w.gtag("config", gaId);
+  w.gtag("config", gaId, { send_page_view: false });
+  markLoaded();
+  sendGaPageView();
+  return true;
+}
+function sendGaPageView() {
+  const w = window;
+  if (!w.__tusConsentGa || typeof w.gtag !== "function" || onCapabilityPage()) return false;
+  w.gtag("event", "page_view", {
+    page_location: window.location.href,
+    page_path: window.location.pathname + window.location.search,
+    page_title: document.title,
+    send_to: w.__tusConsentGa
+  });
   return true;
 }
 function scriptCategory(item) {
@@ -338,6 +360,7 @@ function hashScript(text) {
 function injectConsentScripts(items, allowed) {
   const done = [];
   if (!Array.isArray(items) || typeof document === "undefined") return done;
+  if (onCapabilityPage()) return done;
   items.forEach((item) => {
     if (!item || typeof item.content !== "string" || !item.content.trim()) return;
     const cat = scriptCategory(item);
@@ -366,6 +389,7 @@ ${item.content}`)}`;
       for (const n of nodes) host.appendChild(n);
     }
     done.push(item);
+    markLoaded();
   });
   return done;
 }
@@ -456,6 +480,18 @@ function CookieConsentProvider(props) {
     if (choices.analytics) loadGoogleAnalytics(config.googleAnalyticsId);
     if (choices.marketing) loadMetaPixel(config.metaPixelId);
   }, [active, ready, choices.analytics, choices.marketing, config.googleAnalyticsId, config.metaPixelId]);
+  const address = useAddress();
+  const lastAddress = (0, import_react.useRef)(address);
+  (0, import_react.useEffect)(() => {
+    if (lastAddress.current === address) return;
+    lastAddress.current = address;
+    if (!active || !ready || isEmbeddedOrPreview()) return;
+    if (onCapabilityPage()) {
+      if (consentToolsLoaded()) pageActions.reload();
+      return;
+    }
+    sendGaPageView();
+  }, [address, active, ready]);
   (0, import_react.useEffect)(() => {
     if (!active || !ready) return;
     for (const c of used) if (explicitlyDeclined(stored, c) && !choices[c]) clearCategoryCookies(c);
@@ -515,10 +551,38 @@ function CookieConsentProvider(props) {
 }
 function useConsentScripts(items) {
   const { active, ready, choices } = useConsent();
+  const address = useAddress();
   (0, import_react.useEffect)(() => {
     if (isEmbeddedOrPreview()) return;
     injectConsentScripts(items, active && ready ? choices : OFF);
-  }, [items, active, ready, choices]);
+  }, [items, active, ready, choices, address]);
+}
+function useAddress() {
+  const read = () => typeof window === "undefined" ? "" : window.location.pathname + window.location.search;
+  const [address, setAddress] = (0, import_react.useState)(read);
+  (0, import_react.useEffect)(() => {
+    const w = window;
+    if (!w.__tusConsentHistoryPatched) {
+      w.__tusConsentHistoryPatched = true;
+      for (const name of ["pushState", "replaceState"]) {
+        const original = window.history[name];
+        window.history[name] = function(...args) {
+          const result = original.apply(this, args);
+          window.dispatchEvent(new Event("tus-consent-navigate"));
+          return result;
+        };
+      }
+    }
+    const update = () => setAddress(read());
+    window.addEventListener("popstate", update);
+    window.addEventListener("tus-consent-navigate", update);
+    update();
+    return () => {
+      window.removeEventListener("popstate", update);
+      window.removeEventListener("tus-consent-navigate", update);
+    };
+  }, []);
+  return address;
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
@@ -528,6 +592,7 @@ function useConsentScripts(items) {
   GEO_TIMEOUT_MS,
   bannerNeeded,
   clearCategoryCookies,
+  consentToolsLoaded,
   cookieDomainCandidates,
   effectiveChoices,
   explicitlyDeclined,
@@ -542,6 +607,7 @@ function useConsentScripts(items) {
   regionGroupOf,
   resolveMode,
   scriptCategory,
+  sendGaPageView,
   useConsent,
   useConsentScripts,
   useCookieSettingsLink,

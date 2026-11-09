@@ -6,6 +6,9 @@ import {
   useCookieSettingsLink,
   useConsentScripts,
   injectConsentScripts,
+  loadMetaPixel,
+  loadGoogleAnalytics,
+  consentToolsLoaded,
   regionGroupOf,
   resolveMode,
   pageActions,
@@ -85,7 +88,7 @@ beforeEach(() => {
   window.sessionStorage.clear();
   document.head.innerHTML = '';
   document.body.innerHTML = '';
-  for (const k of ['fbq', '_fbq', 'gtag', 'dataLayer', '__tusConsentGa', '__tusConsentScripts']) delete (window as any)[k];
+  for (const k of ['fbq', '_fbq', 'gtag', 'dataLayer', '__tusConsentGa', '__tusConsentScripts', '__tusConsentLoaded']) delete (window as any)[k];
   vi.spyOn(pageActions, 'reload').mockImplementation(() => {});
 });
 
@@ -628,6 +631,85 @@ describe('site scripts by category', () => {
   });
 });
 
+describe('site scripts on capability pages', () => {
+  const necessary = { id: 'cap-n', placement: 'head', content: '<meta name="cap-necessary">', category: 'necessary' as const };
+  const marketing = { id: 'cap-m', placement: 'bodyEnd', content: '<i id="cap-marketing"></i>', category: 'marketing' as const };
+  const all = { analytics: true, marketing: true };
+
+  for (const url of ['/s/abc', '/g/code', '/he/s/abc', '/page?booking=' + 'a'.repeat(32), '/page?booking=x']) {
+    it(`injects nothing on ${url}`, () => {
+      window.history.replaceState({}, '', url);
+      const done = injectConsentScripts([necessary, marketing], all);
+      expect(done).toEqual([]);
+      expect(document.querySelector('meta[name="cap-necessary"]')).toBeNull();
+      expect(document.getElementById('cap-marketing')).toBeNull();
+    });
+  }
+
+  it('still injects necessary scripts on a normal page', () => {
+    window.history.replaceState({}, '', '/page');
+    injectConsentScripts([necessary], { analytics: false, marketing: false });
+    expect(document.querySelector('meta[name="cap-necessary"]')).not.toBeNull();
+  });
+
+  it('the hook injects after navigating from a capability page to a normal page', async () => {
+    window.history.replaceState({}, '', '/s/abc');
+    function S() {
+      useConsentScripts([necessary]);
+      return null;
+    }
+    geo('IL');
+    render(
+      <CookieConsentProvider storageKey={KEY} legacyAcceptedMeans={['marketing']} config={cfg()} dashboardUrl="https://app.example.test" hasNoticeWords>
+        <S />
+      </CookieConsentProvider>,
+    );
+    await act(async () => {});
+    expect(document.querySelector('meta[name="cap-necessary"]')).toBeNull();
+    act(() => window.history.pushState({}, '', '/page'));
+    expect(document.querySelector('meta[name="cap-necessary"]')).not.toBeNull();
+  });
+});
+
+describe('route changes after load', () => {
+  const pageViews = () =>
+    ((window as any).dataLayer as any[]).map((a) => Array.from(a)).filter((a) => a[0] === 'event' && a[1] === 'page_view');
+
+  it('GA is configured without its own page_view and sends one manual page_view per normal route change', async () => {
+    window.history.replaceState({}, '', '/about');
+    geo('IL');
+    await mount();
+    const cfgCall = ((window as any).dataLayer as any[]).map((a) => Array.from(a)).find((a) => a[0] === 'config');
+    expect(cfgCall[2]).toEqual({ send_page_view: false });
+    expect(pageViews()).toHaveLength(1);
+    act(() => window.history.pushState({}, '', '/contact'));
+    expect(pageViews()).toHaveLength(2);
+    expect(pageViews()[1][2].page_path).toBe('/contact');
+    expect(pageViews().every((p) => !p[2].page_location.includes('/s/'))).toBe(true);
+    expect(pageActions.reload).not.toHaveBeenCalled();
+  });
+
+  it('soft navigation to a capability page after GA loaded: no page_view with /s/ and a reload', async () => {
+    window.history.replaceState({}, '', '/about');
+    geo('IL');
+    await mount();
+    const before = pageViews().length;
+    act(() => window.history.pushState({}, '', '/s/abc'));
+    expect(pageViews()).toHaveLength(before);
+    expect(JSON.stringify((window as any).dataLayer)).not.toContain('/s/abc');
+    expect(pageActions.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('nothing is reloaded when no tool was loaded', async () => {
+    window.history.replaceState({}, '', '/about');
+    geo('DE');
+    await mount();
+    expect(consentToolsLoaded()).toBe(false);
+    act(() => window.history.pushState({}, '', '/s/abc'));
+    expect(pageActions.reload).not.toHaveBeenCalled();
+  });
+});
+
 describe('loaders', () => {
   it('Meta Pixel: autoConfig off before init, PageView after; skipped on a capability page', async () => {
     window.history.replaceState({}, '', '/s/' + 'a'.repeat(32));
@@ -635,6 +717,13 @@ describe('loaders', () => {
     await mount();
     expect(fbScripts()).toBe(0);
     expect(gaScripts()).toBe(0);
+  });
+
+  it('the pixel loader does not run on /s/abc', () => {
+    window.history.replaceState({}, '', '/s/abc');
+    expect(loadMetaPixel('123456789')).toBe(false);
+    expect((window as any).fbq).toBeUndefined();
+    expect(loadGoogleAnalytics('G-ABC123')).toBe(false);
   });
 
   it('Meta Pixel call order', async () => {

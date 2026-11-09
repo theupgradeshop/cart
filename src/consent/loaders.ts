@@ -50,6 +50,14 @@ export function onCapabilityPage(): boolean {
   return isCapabilityPath(window.location.pathname) || searchCarriesCapability(window.location.search);
 }
 
+/** True once a pixel, GA or a site script was loaded in this page-life (only a full reload takes them away). */
+export function consentToolsLoaded(): boolean {
+  return (window as unknown as { __tusConsentLoaded?: boolean }).__tusConsentLoaded === true;
+}
+function markLoaded(): void {
+  (window as unknown as { __tusConsentLoaded?: boolean }).__tusConsentLoaded = true;
+}
+
 type Win = Window & { fbq?: unknown; dataLayer?: unknown[]; gtag?: (...a: unknown[]) => void; __tusConsentGa?: string };
 
 /** Meta Pixel: `autoConfig` off BEFORE init (no click hrefs / page metadata sent), then PageView. Returns true if started. */
@@ -75,6 +83,7 @@ export function loadMetaPixel(pixelId: string | null | undefined): boolean {
   n('set', 'autoConfig', false, pixelId);
   n('init', pixelId);
   n('track', 'PageView');
+  markLoaded();
   return true;
 }
 
@@ -96,7 +105,23 @@ export function loadGoogleAnalytics(gaId: string | null | undefined): boolean {
   s.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(gaId)}`;
   (document.head || document.documentElement).appendChild(s);
   w.gtag('js', new Date());
-  w.gtag('config', gaId);
+  // page views are sent by us, only off capability pages (gtag's own history page views would send the address)
+  w.gtag('config', gaId, { send_page_view: false });
+  markLoaded();
+  sendGaPageView();
+  return true;
+}
+
+/** One manual GA page_view for the current address. No-op when GA is not running or on a capability page. */
+export function sendGaPageView(): boolean {
+  const w = window as Win;
+  if (!w.__tusConsentGa || typeof w.gtag !== 'function' || onCapabilityPage()) return false;
+  w.gtag('event', 'page_view', {
+    page_location: window.location.href,
+    page_path: window.location.pathname + window.location.search,
+    page_title: document.title,
+    send_to: w.__tusConsentGa,
+  });
   return true;
 }
 
@@ -131,7 +156,7 @@ function hashScript(text: string): string {
 }
 
 /**
- * Injects the site scripts whose category is allowed (`necessary` always). `allowed` is the effective choice map.
+ * Injects the site scripts whose category is allowed (`necessary` always), and nothing at all on a capability page. `allowed` is the effective choice map.
  * Each item is injected once per page. Returns the items injected by this call.
  */
 export function injectConsentScripts(
@@ -140,6 +165,8 @@ export function injectConsentScripts(
 ): ConsentScriptItem[] {
   const done: ConsentScriptItem[] = [];
   if (!Array.isArray(items) || typeof document === 'undefined') return done;
+  // Site scripts are third-party code that can read location.href: on a capability address nothing runs, not even `necessary`.
+  if (onCapabilityPage()) return done;
   items.forEach((item) => {
     if (!item || typeof item.content !== 'string' || !item.content.trim()) return;
     const cat = scriptCategory(item);
@@ -168,6 +195,7 @@ export function injectConsentScripts(
       for (const n of nodes) host.appendChild(n);
     }
     done.push(item);
+    markLoaded();
   });
   return done;
 }
