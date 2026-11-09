@@ -276,18 +276,33 @@ function loadGoogleAnalytics(gaId) {
 function scriptCategory(item) {
   return item.category === "necessary" || item.category === "analytics" ? item.category : "marketing";
 }
+function normalizePlacement(placement) {
+  if (placement === "head") return "head";
+  if (placement === "body_start" || placement === "bodyStart") return "bodyStart";
+  return "bodyEnd";
+}
+function hashScript(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h.toString(36);
+}
 function injectConsentScripts(items, allowed) {
   const done = [];
   if (!Array.isArray(items) || typeof document === "undefined") return done;
-  items.forEach((item, index) => {
+  items.forEach((item) => {
     if (!item || typeof item.content !== "string" || !item.content.trim()) return;
     const cat = scriptCategory(item);
     if (cat !== "necessary" && !allowed[cat]) return;
-    const key = `${item.placement}:${item.id ?? index}`;
+    const placement = normalizePlacement(item.placement);
+    const key = `${placement}:${item.id ?? hashScript(`${placement}
+${item.content}`)}`;
     const marks = window.__tusConsentScripts ?? (window.__tusConsentScripts = /* @__PURE__ */ new Set());
     if (marks.has(key)) return;
     marks.add(key);
-    const host = item.placement === "head" ? document.head : document.body;
+    const host = placement === "head" ? document.head : document.body;
     if (!host) return;
     const tpl = document.createElement("template");
     tpl.innerHTML = item.content;
@@ -299,7 +314,7 @@ function injectConsentScripts(items, allowed) {
       fresh.text = old.text;
       return fresh;
     });
-    if (item.placement === "bodyStart") {
+    if (placement === "bodyStart") {
       for (const n of nodes.reverse()) host.insertBefore(n, host.firstChild);
     } else {
       for (const n of nodes) host.appendChild(n);

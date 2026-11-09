@@ -101,9 +101,10 @@ export function loadGoogleAnalytics(gaId: string | null | undefined): boolean {
 }
 
 export interface ConsentScriptItem {
-  /** Stable id of the script (an index is used when absent). */
+  /** Stable id of the script (a hash of placement + content is used when absent). */
   id?: string | number;
-  placement: 'head' | 'bodyStart' | 'bodyEnd' | string;
+  /** `head`, `body_start`/`bodyStart`, `body_end`/`bodyEnd` (any other value lands at the body end). */
+  placement: 'head' | 'body_start' | 'bodyStart' | 'body_end' | 'bodyEnd' | string;
   content: string;
   /** necessary | analytics | marketing | null (null counts as marketing). */
   category?: 'necessary' | ConsentCategory | null;
@@ -111,6 +112,22 @@ export interface ConsentScriptItem {
 
 export function scriptCategory(item: ConsentScriptItem): 'necessary' | ConsentCategory {
   return item.category === 'necessary' || item.category === 'analytics' ? item.category : 'marketing';
+}
+
+function normalizePlacement(placement: string): 'head' | 'bodyStart' | 'bodyEnd' {
+  if (placement === 'head') return 'head';
+  if (placement === 'body_start' || placement === 'bodyStart') return 'bodyStart';
+  return 'bodyEnd';
+}
+
+/** FNV-1a 32-bit hash, base 36: a stable key for an item that has no id. */
+function hashScript(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(36);
 }
 
 /**
@@ -123,15 +140,16 @@ export function injectConsentScripts(
 ): ConsentScriptItem[] {
   const done: ConsentScriptItem[] = [];
   if (!Array.isArray(items) || typeof document === 'undefined') return done;
-  items.forEach((item, index) => {
+  items.forEach((item) => {
     if (!item || typeof item.content !== 'string' || !item.content.trim()) return;
     const cat = scriptCategory(item);
     if (cat !== 'necessary' && !allowed[cat]) return;
-    const key = `${item.placement}:${item.id ?? index}`;
+    const placement = normalizePlacement(item.placement);
+    const key = `${placement}:${item.id ?? hashScript(`${placement}\n${item.content}`)}`;
     const marks = ((window as unknown as { __tusConsentScripts?: Set<string> }).__tusConsentScripts ??= new Set());
     if (marks.has(key)) return;
     marks.add(key);
-    const host = item.placement === 'head' ? document.head : document.body;
+    const host = placement === 'head' ? document.head : document.body;
     if (!host) return;
     const tpl = document.createElement('template');
     tpl.innerHTML = item.content;
@@ -144,7 +162,7 @@ export function injectConsentScripts(
       fresh.text = old.text;
       return fresh;
     });
-    if (item.placement === 'bodyStart') {
+    if (placement === 'bodyStart') {
       for (const n of nodes.reverse()) host.insertBefore(n, host.firstChild);
     } else {
       for (const n of nodes) host.appendChild(n);

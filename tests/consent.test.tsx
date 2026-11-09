@@ -571,6 +571,40 @@ describe('site scripts by category', () => {
     expect(first.text).toContain('__ran');
   });
 
+  it('puts a snake_case body_start item first in the body, and body_end last', () => {
+    document.body.innerHTML = '<p id="existing"></p>';
+    injectConsentScripts(
+      [
+        { placement: 'body_end', content: '<meta name="end-snake">', category: 'necessary' },
+        { placement: 'body_start', content: '<meta name="start-snake">', category: 'necessary' },
+      ],
+      { analytics: false, marketing: false },
+    );
+    expect((document.body.firstElementChild as HTMLElement).getAttribute('name')).toBe('start-snake');
+    expect((document.body.lastElementChild as HTMLElement).getAttribute('name')).toBe('end-snake');
+    injectConsentScripts([{ placement: 'bodyEnd', content: '<meta name="end-camel">', category: 'necessary' }], {
+      analytics: false,
+      marketing: false,
+    });
+    expect((document.body.lastElementChild as HTMLElement).getAttribute('name')).toBe('end-camel');
+  });
+
+  it('two different id-less items at the same index on different calls both inject', () => {
+    const none = { analytics: false, marketing: false };
+    injectConsentScripts([{ placement: 'head', content: '<meta name="page-a">', category: 'necessary' }], none);
+    injectConsentScripts([{ placement: 'head', content: '<meta name="page-b">', category: 'necessary' }], none);
+    expect(document.querySelectorAll('meta[name="page-a"]').length).toBe(1);
+    expect(document.querySelectorAll('meta[name="page-b"]').length).toBe(1);
+  });
+
+  it('the same id-less content twice does not double-inject, whatever its index', () => {
+    const none = { analytics: false, marketing: false };
+    const dup = { placement: 'head', content: '<meta name="dup-once">', category: 'necessary' as const };
+    injectConsentScripts([dup], none);
+    injectConsentScripts([{ placement: 'head', content: '<meta name="other">', category: 'necessary' }, dup], none);
+    expect(document.querySelectorAll('meta[name="dup-once"]').length).toBe(1);
+  });
+
   function Scripts() {
     useConsentScripts(items);
     return null;

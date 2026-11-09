@@ -611,7 +611,7 @@ import { CookieConsentProvider, useConsent, useCookieSettingsLink, useConsentScr
 `useConsent()` returns `{ ready, active, mode: 'ask' | 'notice', categories, choices, bannerOpen, settingsOpen, privacyPath, acceptAll, declineAll, save(choices), openSettings, closeSettings }`.
 `categories` are the categories that have a tool in use: draw one switch each. `choices` is what may run right now.
 `useCookieSettingsLink()` returns `{ visible, open }` for the footer link (no markup; `visible` is false where there is no banner).
-`useConsentScripts(items)` injects the public site scripts (`{ placement, content, category }`) whose category is allowed
+`useConsentScripts(items)` injects the public site scripts (`{ placement, content, category }`; placement `head`, `body_start` or `body_end`, the camelCase `bodyStart`/`bodyEnd` also accepted; an item without `id` is keyed by a hash of placement + content, so it injects once per page) whose category is allowed
 (`necessary` always, a null category counts as marketing); `injectConsentScripts` is the same without a hook.
 
 ### What it does

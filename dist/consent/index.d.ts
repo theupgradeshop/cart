@@ -70,9 +70,10 @@ declare function loadMetaPixel(pixelId: string | null | undefined): boolean;
 /** Google Analytics (gtag.js). Returns true if started. */
 declare function loadGoogleAnalytics(gaId: string | null | undefined): boolean;
 interface ConsentScriptItem {
-    /** Stable id of the script (an index is used when absent). */
+    /** Stable id of the script (a hash of placement + content is used when absent). */
     id?: string | number;
-    placement: 'head' | 'bodyStart' | 'bodyEnd' | string;
+    /** `head`, `body_start`/`bodyStart`, `body_end`/`bodyEnd` (any other value lands at the body end). */
+    placement: 'head' | 'body_start' | 'bodyStart' | 'body_end' | 'bodyEnd' | string;
     content: string;
     /** necessary | analytics | marketing | null (null counts as marketing). */
     category?: 'necessary' | ConsentCategory | null;
