@@ -145,6 +145,16 @@ export function explicitlyDeclined(stored: StoredConsent | null, category: Conse
   return !!stored && stored.asked.includes(category) && stored.choices[category] === false;
 }
 
+/** True only when the browser sends Global Privacy Control (`navigator.globalPrivacyControl === true`). */
+export function gpcSignal(): boolean {
+  return typeof navigator !== 'undefined' && (navigator as unknown as { globalPrivacyControl?: unknown }).globalPrivacyControl === true;
+}
+
+/** US visitor (resolved country `US`). Unknown / malformed country = not US. */
+export function isUSCountry(country: string | null | undefined): boolean {
+  return typeof country === 'string' && country.trim().toUpperCase() === 'US';
+}
+
 // ---- cookies -------------------------------------------------------------------------------------------------------
 
 const COOKIES: Record<ConsentCategory, RegExp> = {

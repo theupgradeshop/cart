@@ -48,6 +48,10 @@ type ChoicesState = ConsentChoices;
 declare function bannerNeeded(stored: StoredConsent | null, mode: ConsentMode, used: ConsentCategory[]): boolean;
 /** True only for an explicit "off" the visitor chose for a category. */
 declare function explicitlyDeclined(stored: StoredConsent | null, category: ConsentCategory): boolean;
+/** True only when the browser sends Global Privacy Control (`navigator.globalPrivacyControl === true`). */
+declare function gpcSignal(): boolean;
+/** US visitor (resolved country `US`). Unknown / malformed country = not US. */
+declare function isUSCountry(country: string | null | undefined): boolean;
 /** `a.b.example.com` -> [`a.b.example.com`, `b.example.com`, `example.com`] (never a bare top-level label). */
 declare function cookieDomainCandidates(host: string): string[];
 /** Expires the category's cookies for the current host and every parent domain, path `/`. */
@@ -126,6 +130,12 @@ interface ConsentState {
     settingsOpen: boolean;
     /** Privacy page path from the snapshot. */
     privacyPath: string | null;
+    /** The browser sent Global Privacy Control: Analytics and Marketing are off in every region, no banner asks, switches stay off. */
+    gpc: boolean;
+    /** The resolved visitor country (null = unknown / call failed). */
+    country: string | null;
+    /** The visitor is in the US (resolved country `US`): the settings control reads "Do not sell or share my info". */
+    isUS: boolean;
     acceptAll: () => void;
     declineAll: () => void;
     save: (choices: Partial<ConsentChoices>) => void;
@@ -137,6 +147,7 @@ declare function useConsent(): ConsentState;
 declare function useCookieSettingsLink(): {
     visible: boolean;
     open: () => void;
+    isUS: boolean;
 };
 declare function CookieConsentProvider(props: CookieConsentProviderProps): react.FunctionComponentElement<react.ProviderProps<ConsentState | null>>;
 /**
@@ -146,4 +157,4 @@ declare function CookieConsentProvider(props: CookieConsentProviderProps): react
  */
 declare function useConsentScripts(items: ConsentScriptItem[] | null | undefined): void;
 
-export { CATEGORIES, CONSENT_CHANGE_EVENT, type ConsentCategory, type ConsentChoices, type ConsentConfig, type ConsentMode, type ConsentScriptItem, type ConsentState, CookieConsentProvider, type CookieConsentProviderProps, GEO_TIMEOUT_MS, type RegionGroup, type StoredConsent, bannerNeeded, clearCategoryCookies, consentToolsLoaded, cookieDomainCandidates, effectiveChoices, explicitlyDeclined, fetchCountry, inUse, injectConsentScripts, isEmbeddedOrPreview, loadGoogleAnalytics, loadMetaPixel, pageActions, readStored, regionGroupOf, resolveMode, scriptCategory, sendGaPageView, sendMetaPageView, useConsent, useConsentScripts, useCookieSettingsLink, writeStored };
+export { CATEGORIES, CONSENT_CHANGE_EVENT, type ConsentCategory, type ConsentChoices, type ConsentConfig, type ConsentMode, type ConsentScriptItem, type ConsentState, CookieConsentProvider, type CookieConsentProviderProps, GEO_TIMEOUT_MS, type RegionGroup, type StoredConsent, bannerNeeded, clearCategoryCookies, consentToolsLoaded, cookieDomainCandidates, effectiveChoices, explicitlyDeclined, fetchCountry, gpcSignal, inUse, injectConsentScripts, isEmbeddedOrPreview, isUSCountry, loadGoogleAnalytics, loadMetaPixel, pageActions, readStored, regionGroupOf, resolveMode, scriptCategory, sendGaPageView, sendMetaPageView, useConsent, useConsentScripts, useCookieSettingsLink, writeStored };

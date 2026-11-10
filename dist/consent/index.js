@@ -33,9 +33,11 @@ __export(index_exports, {
   effectiveChoices: () => effectiveChoices,
   explicitlyDeclined: () => explicitlyDeclined,
   fetchCountry: () => fetchCountry,
+  gpcSignal: () => gpcSignal,
   inUse: () => inUse,
   injectConsentScripts: () => injectConsentScripts,
   isEmbeddedOrPreview: () => isEmbeddedOrPreview,
+  isUSCountry: () => isUSCountry,
   loadGoogleAnalytics: () => loadGoogleAnalytics,
   loadMetaPixel: () => loadMetaPixel,
   pageActions: () => pageActions,
@@ -165,6 +167,12 @@ function bannerNeeded(stored, mode, used) {
 }
 function explicitlyDeclined(stored, category) {
   return !!stored && stored.asked.includes(category) && stored.choices[category] === false;
+}
+function gpcSignal() {
+  return typeof navigator !== "undefined" && navigator.globalPrivacyControl === true;
+}
+function isUSCountry(country) {
+  return typeof country === "string" && country.trim().toUpperCase() === "US";
 }
 var COOKIES = {
   analytics: /^(_ga|_gid|_ga_.+)$/,
@@ -440,6 +448,9 @@ var INERT = {
   bannerOpen: false,
   settingsOpen: false,
   privacyPath: null,
+  gpc: false,
+  country: null,
+  isUS: false,
   acceptAll: () => {
   },
   declineAll: () => {
@@ -457,7 +468,7 @@ function useConsent() {
 }
 function useCookieSettingsLink() {
   const c = useConsent();
-  return { visible: c.active && c.ready, open: c.openSettings };
+  return { visible: c.active && c.ready, open: c.openSettings, isUS: c.isUS };
 }
 var warnedNoticeWords = false;
 function CookieConsentProvider(props) {
@@ -466,6 +477,7 @@ function CookieConsentProvider(props) {
   const [stored, setStored] = (0, import_react.useState)(null);
   const [geo, setGeo] = (0, import_react.useState)({ done: false, country: null });
   const [settingsOpen, setSettingsOpen] = (0, import_react.useState)(false);
+  const [gpc, setGpc] = (0, import_react.useState)(false);
   const legacyKey = legacyAcceptedMeans.join(",");
   const used = (0, import_react.useMemo)(() => inUse(config), [config]);
   const mode = geo.done ? resolveMode(geo.country, config) : "ask";
@@ -484,6 +496,7 @@ function CookieConsentProvider(props) {
   (0, import_react.useEffect)(() => {
     if (isEmbeddedOrPreview()) return;
     setEmbedded(false);
+    setGpc(gpcSignal());
     const legacy = legacyKey ? legacyKey.split(",") : [];
     setStored(readStored(storageKey, legacy));
     let cancelled = false;
@@ -500,20 +513,21 @@ function CookieConsentProvider(props) {
     };
   }, [storageKey, legacyKey, dashboardUrl]);
   const choices = (0, import_react.useMemo)(
-    () => active && ready ? effectiveChoices(stored, mode, used) : OFF,
-    [active, ready, stored, mode, used]
+    () => active && ready && !gpc ? effectiveChoices(stored, mode, used) : OFF,
+    [active, ready, gpc, stored, mode, used]
   );
-  const bannerOpen = active && ready && bannerNeeded(stored, mode, used);
+  const bannerOpen = active && ready && !gpc && bannerNeeded(stored, mode, used);
   const live = (0, import_react.useRef)({ marketing: false, declined: false });
-  live.current = { marketing: choices.marketing, declined: explicitlyDeclined(stored, "marketing") };
+  live.current = { marketing: choices.marketing, declined: gpc || explicitlyDeclined(stored, "marketing") };
   (0, import_react.useEffect)(() => {
     (0, import_tracking.configureTracking)({ hasConsent: () => live.current.marketing, hasDeclined: () => live.current.declined });
   }, []);
   (0, import_react.useEffect)(() => {
     if (!active || !ready) return;
+    if (gpc) return;
     if (choices.analytics) loadGoogleAnalytics(config.googleAnalyticsId);
     if (choices.marketing) loadMetaPixel(config.metaPixelId);
-  }, [active, ready, choices.analytics, choices.marketing, config.googleAnalyticsId, config.metaPixelId]);
+  }, [active, ready, gpc, choices.analytics, choices.marketing, config.googleAnalyticsId, config.metaPixelId]);
   const address = useAddress();
   const lastAddress = (0, import_react.useRef)(address);
   (0, import_react.useEffect)(() => {
@@ -531,6 +545,10 @@ function CookieConsentProvider(props) {
     if (!active || !ready) return;
     for (const c of used) if (explicitlyDeclined(stored, c) && !choices[c]) clearCategoryCookies(c);
   }, [active, ready, stored, choices, used]);
+  (0, import_react.useEffect)(() => {
+    if (!active || !ready || !gpc) return;
+    for (const c of used) clearCategoryCookies(c);
+  }, [active, ready, gpc, used]);
   const choicesRef = (0, import_react.useRef)(choices);
   choicesRef.current = choices;
   const storedRef = (0, import_react.useRef)(stored);
@@ -542,7 +560,7 @@ function CookieConsentProvider(props) {
       const prev = choicesRef.current;
       const base = storedRef.current;
       const next = { ...base?.choices ?? OFF };
-      for (const c of used) next[c] = typeof partial[c] === "boolean" ? partial[c] : prev[c];
+      for (const c of used) next[c] = gpc ? false : typeof partial[c] === "boolean" ? partial[c] : prev[c];
       const asked = CATEGORIES.filter((c) => used.includes(c) || (base?.asked ?? []).includes(c));
       const value2 = { mode: modeRef.current, asked, choices: next, at: Date.now() };
       writeStored(storageKey, value2);
@@ -558,7 +576,7 @@ function CookieConsentProvider(props) {
       window.dispatchEvent(new Event(CONSENT_CHANGE_EVENT));
       if (withdrawn) pageActions.reload();
     },
-    [storageKey, used]
+    [storageKey, used, gpc]
   );
   const acceptAll = (0, import_react.useCallback)(() => save({ analytics: true, marketing: true }), [save]);
   const declineAll = (0, import_react.useCallback)(() => save({ analytics: false, marketing: false }), [save]);
@@ -574,13 +592,16 @@ function CookieConsentProvider(props) {
       bannerOpen,
       settingsOpen: active && settingsOpen,
       privacyPath: config.privacyPath ?? null,
+      gpc,
+      country: geo.done ? geo.country : null,
+      isUS: geo.done && isUSCountry(geo.country),
       acceptAll,
       declineAll,
       save,
       openSettings,
       closeSettings
     }),
-    [ready, active, mode, used, choices, bannerOpen, settingsOpen, config.privacyPath, acceptAll, declineAll, save, openSettings, closeSettings]
+    [ready, active, mode, used, choices, bannerOpen, settingsOpen, config.privacyPath, gpc, geo, acceptAll, declineAll, save, openSettings, closeSettings]
   );
   return (0, import_react.createElement)(ConsentContext.Provider, { value }, children);
 }
@@ -636,9 +657,11 @@ function useAddress() {
   effectiveChoices,
   explicitlyDeclined,
   fetchCountry,
+  gpcSignal,
   inUse,
   injectConsentScripts,
   isEmbeddedOrPreview,
+  isUSCountry,
   loadGoogleAnalytics,
   loadMetaPixel,
   pageActions,

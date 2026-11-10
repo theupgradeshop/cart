@@ -12,7 +12,9 @@ import {
   effectiveChoices,
   explicitlyDeclined,
   fetchCountry,
+  gpcSignal,
   inUse,
+  isUSCountry,
   isEmbeddedOrPreview,
   pageActions,
   readStored,
@@ -82,6 +84,12 @@ export interface ConsentState {
   settingsOpen: boolean;
   /** Privacy page path from the snapshot. */
   privacyPath: string | null;
+  /** The browser sent Global Privacy Control: Analytics and Marketing are off in every region, no banner asks, switches stay off. */
+  gpc: boolean;
+  /** The resolved visitor country (null = unknown / call failed). */
+  country: string | null;
+  /** The visitor is in the US (resolved country `US`): the settings control reads "Do not sell or share my info". */
+  isUS: boolean;
   acceptAll: () => void;
   declineAll: () => void;
   save: (choices: Partial<ConsentChoices>) => void;
@@ -99,6 +107,9 @@ const INERT: ConsentState = {
   bannerOpen: false,
   settingsOpen: false,
   privacyPath: null,
+  gpc: false,
+  country: null,
+  isUS: false,
   acceptAll: () => {},
   declineAll: () => {},
   save: () => {},
@@ -113,9 +124,9 @@ export function useConsent(): ConsentState {
 }
 
 /** For a footer "Cookie settings" link: `visible` is false where the banner is off (nothing to reopen). No markup. */
-export function useCookieSettingsLink(): { visible: boolean; open: () => void } {
+export function useCookieSettingsLink(): { visible: boolean; open: () => void; isUS: boolean } {
   const c = useConsent();
-  return { visible: c.active && c.ready, open: c.openSettings };
+  return { visible: c.active && c.ready, open: c.openSettings, isUS: c.isUS };
 }
 
 let warnedNoticeWords = false;
@@ -126,6 +137,7 @@ export function CookieConsentProvider(props: CookieConsentProviderProps) {
   const [stored, setStored] = useState<StoredConsent | null>(null);
   const [geo, setGeo] = useState<{ done: boolean; country: string | null }>({ done: false, country: null });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [gpc, setGpc] = useState(false);
   const legacyKey = legacyAcceptedMeans.join(',');
 
   const used = useMemo(() => inUse(config), [config]);
@@ -148,6 +160,7 @@ export function CookieConsentProvider(props: CookieConsentProviderProps) {
   useEffect(() => {
     if (isEmbeddedOrPreview()) return;
     setEmbedded(false);
+    setGpc(gpcSignal());
     const legacy = legacyKey ? (legacyKey.split(',') as ConsentCategory[]) : [];
     setStored(readStored(storageKey, legacy));
     let cancelled = false;
@@ -165,14 +178,15 @@ export function CookieConsentProvider(props: CookieConsentProviderProps) {
   }, [storageKey, legacyKey, dashboardUrl]);
 
   const choices = useMemo(
-    () => (active && ready ? effectiveChoices(stored, mode, used) : OFF),
-    [active, ready, stored, mode, used],
+    () => (active && ready && !gpc ? effectiveChoices(stored, mode, used) : OFF),
+    [active, ready, gpc, stored, mode, used],
   );
-  const bannerOpen = active && ready && bannerNeeded(stored, mode, used);
+  // GPC leaves only Necessary, so nothing is left to ask for
+  const bannerOpen = active && ready && !gpc && bannerNeeded(stored, mode, used);
 
   // refs read by the cart's tracking module (Purchase / Lead fire only with MARKETING on)
   const live = useRef({ marketing: false, declined: false });
-  live.current = { marketing: choices.marketing, declined: explicitlyDeclined(stored, 'marketing') };
+  live.current = { marketing: choices.marketing, declined: gpc || explicitlyDeclined(stored, 'marketing') };
   useEffect(() => {
     configureTracking({ hasConsent: () => live.current.marketing, hasDeclined: () => live.current.declined });
   }, []);
@@ -180,9 +194,10 @@ export function CookieConsentProvider(props: CookieConsentProviderProps) {
   // loaders: only when the category is allowed
   useEffect(() => {
     if (!active || !ready) return;
+    if (gpc) return;
     if (choices.analytics) loadGoogleAnalytics(config.googleAnalyticsId);
     if (choices.marketing) loadMetaPixel(config.metaPixelId);
-  }, [active, ready, choices.analytics, choices.marketing, config.googleAnalyticsId, config.metaPixelId]);
+  }, [active, ready, gpc, choices.analytics, choices.marketing, config.googleAnalyticsId, config.metaPixelId]);
 
   // route changes: manual GA page_view + Meta PageView off capability pages. A soft navigation onto a capability page is
   // stopped earlier (the history patch below hard-navigates BEFORE the address changes); only a back/forward (popstate)
@@ -207,6 +222,12 @@ export function CookieConsentProvider(props: CookieConsentProviderProps) {
     for (const c of used) if (explicitlyDeclined(stored, c) && !choices[c]) clearCategoryCookies(c);
   }, [active, ready, stored, choices, used]);
 
+  // GPC: whatever was stored, the cookies of both categories go once (no reload: nothing was started in this page)
+  useEffect(() => {
+    if (!active || !ready || !gpc) return;
+    for (const c of used) clearCategoryCookies(c);
+  }, [active, ready, gpc, used]);
+
   const choicesRef = useRef(choices);
   choicesRef.current = choices;
   const storedRef = useRef(stored);
@@ -219,7 +240,7 @@ export function CookieConsentProvider(props: CookieConsentProviderProps) {
       const prev = choicesRef.current;
       const base = storedRef.current;
       const next: ConsentChoices = { ...(base?.choices ?? OFF) };
-      for (const c of used) next[c] = typeof partial[c] === 'boolean' ? (partial[c] as boolean) : prev[c];
+      for (const c of used) next[c] = gpc ? false : typeof partial[c] === 'boolean' ? (partial[c] as boolean) : prev[c];
       const asked = CATEGORIES.filter((c) => used.includes(c) || (base?.asked ?? []).includes(c));
       const value: StoredConsent = { mode: modeRef.current, asked, choices: next, at: Date.now() };
       writeStored(storageKey, value);
@@ -236,7 +257,7 @@ export function CookieConsentProvider(props: CookieConsentProviderProps) {
       // a tool already running in this page only stops on a reload
       if (withdrawn) pageActions.reload();
     },
-    [storageKey, used],
+    [storageKey, used, gpc],
   );
 
   const acceptAll = useCallback(() => save({ analytics: true, marketing: true }), [save]);
@@ -254,13 +275,16 @@ export function CookieConsentProvider(props: CookieConsentProviderProps) {
       bannerOpen,
       settingsOpen: active && settingsOpen,
       privacyPath: config.privacyPath ?? null,
+      gpc,
+      country: geo.done ? geo.country : null,
+      isUS: geo.done && isUSCountry(geo.country),
       acceptAll,
       declineAll,
       save,
       openSettings,
       closeSettings,
     }),
-    [ready, active, mode, used, choices, bannerOpen, settingsOpen, config.privacyPath, acceptAll, declineAll, save, openSettings, closeSettings],
+    [ready, active, mode, used, choices, bannerOpen, settingsOpen, config.privacyPath, gpc, geo, acceptAll, declineAll, save, openSettings, closeSettings],
   );
 
   return createElement(ConsentContext.Provider, { value }, children);

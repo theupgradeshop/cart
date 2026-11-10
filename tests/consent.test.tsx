@@ -35,7 +35,7 @@ function cfg(over: Partial<ConsentConfig> = {}): ConsentConfig {
 }
 
 let api: ConsentState;
-let link: { visible: boolean; open: () => void };
+let link: { visible: boolean; open: () => void; isUS: boolean };
 function Probe() {
   api = useConsent();
   link = useCookieSettingsLink();
@@ -55,6 +55,7 @@ function geo(country: string | null | 'fail' | 'hang') {
 }
 
 async function mount(props: Partial<React.ComponentProps<typeof CookieConsentProvider>> = {}) {
+  const { children: extra, ...rest } = props;
   const view = render(
     <CookieConsentProvider
       storageKey={KEY}
@@ -62,9 +63,10 @@ async function mount(props: Partial<React.ComponentProps<typeof CookieConsentPro
       config={cfg()}
       dashboardUrl="https://app.example.test"
       hasNoticeWords
-      {...props}
+      {...rest}
     >
       <Probe />
+      {extra}
     </CookieConsentProvider>,
   );
   await act(async () => {});
@@ -107,7 +109,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   for (const n of ['_ga', '_gid', '_ga_ABC', '_fbp', '_fbc']) document.cookie = `${n}=; path=/; max-age=0`;
+  delete (navigator as any).globalPrivacyControl;
 });
+
+function setGpc(value: unknown = true) {
+  Object.defineProperty(navigator, 'globalPrivacyControl', { value, configurable: true });
+}
 
 describe('regions', () => {
   it('maps countries to groups', () => {
@@ -913,5 +920,111 @@ describe('loaders', () => {
     geo('IL');
     await mount({ config: cfg({ metaPixelId: "1');alert(1)//", googleAnalyticsId: 'x"><script>' }) });
     expect(fbScripts() + gaScripts()).toBe(0);
+  });
+});
+
+describe('Global Privacy Control', () => {
+  it('Ask region: no banner, no loader, analytics and marketing off, link still visible', async () => {
+    setGpc();
+    geo('DE');
+    await mount();
+    expect(api.gpc).toBe(true);
+    expect(api.bannerOpen).toBe(false);
+    expect(api.choices).toEqual({ analytics: false, marketing: false });
+    expect(gaScripts()).toBe(0);
+    expect(fbScripts()).toBe(0);
+    expect(link.visible).toBe(true);
+  });
+
+  it('Notice region: nothing loads even though notice would run the tools', async () => {
+    setGpc();
+    geo('IL');
+    await mount();
+    expect(api.bannerOpen).toBe(false);
+    expect(api.choices).toEqual({ analytics: false, marketing: false });
+    expect(gaScripts()).toBe(0);
+    expect(fbScripts()).toBe(0);
+  });
+
+  it('site scripts of analytics, marketing and null category do not run; necessary does', async () => {
+    setGpc();
+    geo('IL');
+    window.history.replaceState({}, '', '/');
+    function Scripts() {
+      useConsentScripts([
+        { id: 'a', placement: 'head', content: '<meta name="gpc-a">', category: 'analytics' },
+        { id: 'm', placement: 'head', content: '<meta name="gpc-m">', category: 'marketing' },
+        { id: 'n', placement: 'head', content: '<meta name="gpc-n">', category: null },
+        { id: 'x', placement: 'head', content: '<meta name="gpc-x">', category: 'necessary' },
+      ]);
+      return null;
+    }
+    await mount({ children: <Scripts /> });
+    expect(document.querySelector('meta[name="gpc-a"]')).toBeNull();
+    expect(document.querySelector('meta[name="gpc-m"]')).toBeNull();
+    expect(document.querySelector('meta[name="gpc-n"]')).toBeNull();
+    expect(document.querySelector('meta[name="gpc-x"]')).not.toBeNull();
+  });
+
+  it('a stored accepted choice is off, its cookies are cleared once, and the page is not reloaded', async () => {
+    setGpc();
+    geo('DE');
+    store({ mode: 'ask', asked: BOTH, choices: { analytics: true, marketing: true }, at: 1 });
+    setCookie('_ga');
+    setCookie('_fbp');
+    await mount();
+    expect(api.choices).toEqual({ analytics: false, marketing: false });
+    expect(hasCookie('_ga')).toBe(false);
+    expect(hasCookie('_fbp')).toBe(false);
+    expect(gaScripts()).toBe(0);
+    expect(pageActions.reload).not.toHaveBeenCalled();
+    act(() => api.acceptAll());
+    expect(api.choices).toEqual({ analytics: false, marketing: false });
+    expect(pageActions.reload).not.toHaveBeenCalled();
+  });
+
+  it('marketing is off in a Notice region, which is what the cart events read', async () => {
+    setGpc();
+    geo('IL');
+    await mount();
+    expect(api.choices.marketing).toBe(false);
+  });
+
+  it('only a literal true counts', async () => {
+    setGpc('true');
+    geo('DE');
+    await mount();
+    expect(api.gpc).toBe(false);
+    expect(api.bannerOpen).toBe(true);
+  });
+
+  it('without GPC nothing changes', async () => {
+    geo('DE');
+    await mount();
+    expect(api.gpc).toBe(false);
+    expect(api.bannerOpen).toBe(true);
+  });
+});
+
+describe('US label flag', () => {
+  it('is true for US only', async () => {
+    geo('US');
+    await mount();
+    expect(api.country).toBe('US');
+    expect(api.isUS).toBe(true);
+    expect(link.isUS).toBe(true);
+  });
+
+  it.each(['IL', 'DE', null])('is false for %s', async (c) => {
+    geo(c as string | null);
+    await mount();
+    expect(api.isUS).toBe(false);
+    expect(link.isUS).toBe(false);
+  });
+
+  it('is false while the region is unknown (call failed)', async () => {
+    geo('fail');
+    await mount();
+    expect(api.isUS).toBe(false);
   });
 });
