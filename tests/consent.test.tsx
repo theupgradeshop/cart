@@ -990,6 +990,47 @@ describe('Global Privacy Control', () => {
     expect(api.choices.marketing).toBe(false);
   });
 
+  it.each([
+    ['save', () => api.save({ analytics: true })],
+    ['acceptAll', () => api.acceptAll()],
+    ['declineAll', () => api.declineAll()],
+  ])('%s under GPC writes nothing, reloads nothing and only closes the panel (empty store)', async (_n, act1) => {
+    setGpc();
+    geo('DE');
+    await mount();
+    act(() => api.openSettings());
+    expect(api.settingsOpen).toBe(true);
+    act(act1);
+    expect(window.localStorage.getItem(KEY)).toBeNull();
+    expect(api.settingsOpen).toBe(false);
+    expect(pageActions.reload).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['save', () => api.save({ analytics: false })],
+    ['acceptAll', () => api.acceptAll()],
+    ['declineAll', () => api.declineAll()],
+  ])('%s under GPC leaves a stored "on" byte-for-byte, and GPC off applies it again', async (_n, act1) => {
+    setGpc();
+    geo('DE');
+    const on = { mode: 'ask', asked: BOTH, choices: { analytics: true, marketing: true }, at: 1 };
+    store(on);
+    const before = window.localStorage.getItem(KEY);
+    const view = await mount();
+    act(() => api.openSettings());
+    act(act1);
+    expect(window.localStorage.getItem(KEY)).toBe(before);
+    expect(api.settingsOpen).toBe(false);
+    expect(pageActions.reload).not.toHaveBeenCalled();
+    view.unmount();
+    delete (navigator as any).globalPrivacyControl;
+    window.sessionStorage.clear();
+    await mount();
+    expect(api.gpc).toBe(false);
+    expect(api.choices).toEqual({ analytics: true, marketing: true });
+    expect(api.bannerOpen).toBe(false);
+  });
+
   it('only a literal true counts', async () => {
     setGpc('true');
     geo('DE');

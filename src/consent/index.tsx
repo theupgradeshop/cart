@@ -237,10 +237,15 @@ export function CookieConsentProvider(props: CookieConsentProviderProps) {
 
   const save = useCallback(
     (partial: Partial<ConsentChoices>) => {
+      // GPC: nothing is stored (a stored choice is the visitor's, and survives for when GPC is off); the panel just closes
+      if (gpc) {
+        setSettingsOpen(false);
+        return;
+      }
       const prev = choicesRef.current;
       const base = storedRef.current;
       const next: ConsentChoices = { ...(base?.choices ?? OFF) };
-      for (const c of used) next[c] = gpc ? false : typeof partial[c] === 'boolean' ? (partial[c] as boolean) : prev[c];
+      for (const c of used) next[c] = typeof partial[c] === 'boolean' ? (partial[c] as boolean) : prev[c];
       const asked = CATEGORIES.filter((c) => used.includes(c) || (base?.asked ?? []).includes(c));
       const value: StoredConsent = { mode: modeRef.current, asked, choices: next, at: Date.now() };
       writeStored(storageKey, value);

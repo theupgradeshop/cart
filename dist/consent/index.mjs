@@ -506,10 +506,14 @@ function CookieConsentProvider(props) {
   modeRef.current = mode;
   const save = useCallback(
     (partial) => {
+      if (gpc) {
+        setSettingsOpen(false);
+        return;
+      }
       const prev = choicesRef.current;
       const base = storedRef.current;
       const next = { ...base?.choices ?? OFF };
-      for (const c of used) next[c] = gpc ? false : typeof partial[c] === "boolean" ? partial[c] : prev[c];
+      for (const c of used) next[c] = typeof partial[c] === "boolean" ? partial[c] : prev[c];
       const asked = CATEGORIES.filter((c) => used.includes(c) || (base?.asked ?? []).includes(c));
       const value2 = { mode: modeRef.current, asked, choices: next, at: Date.now() };
       writeStored(storageKey, value2);
