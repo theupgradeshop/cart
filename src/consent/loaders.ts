@@ -32,12 +32,17 @@ export function isCapabilityPath(pathname: string | null | undefined): boolean {
   return typeof pathname === 'string' && CAPABILITY_PATH.test(pathname);
 }
 
+/**
+ * True when the query holds a capability: a `booking` parameter (the booking-resume token), a `t` parameter (the guest-link token of
+ * /appointment?a=move|cancel&t=<token>), or any decoded value that holds a capability address.
+ */
 export function searchCarriesCapability(search: string | null | undefined): boolean {
   if (typeof search !== 'string' || search === '') return false;
   const values = [search.replace(/^\?/, '')];
   try {
     const params = new URLSearchParams(search);
     if (params.has('booking')) return true;
+    if (params.has('t')) return true; // /appointment?a=move|cancel&t=<token>: the guest-link token names one booking and moves or cancels it
     params.forEach((v) => values.push(v));
   } catch {
     // the raw string is still checked

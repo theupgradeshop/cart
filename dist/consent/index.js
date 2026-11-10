@@ -286,6 +286,7 @@ function searchCarriesCapability(search) {
   try {
     const params = new URLSearchParams(search);
     if (params.has("booking")) return true;
+    if (params.has("t")) return true;
     params.forEach((v) => values.push(v));
   } catch {
   }

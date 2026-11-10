@@ -18,6 +18,7 @@ import {
   type ConsentCategory,
 } from '../src/consent';
 import { trackLead } from '../src/tracking';
+import { searchCarriesCapability } from '../src/consent/loaders';
 
 const KEY = 'test-cookie-consent';
 const BOTH: ConsentCategory[] = ['analytics', 'marketing'];
@@ -686,7 +687,7 @@ describe('site scripts on capability pages', () => {
   const marketing = { id: 'cap-m', placement: 'bodyEnd', content: '<i id="cap-marketing"></i>', category: 'marketing' as const };
   const all = { analytics: true, marketing: true };
 
-  for (const url of ['/s/abc', '/g/code', '/he/s/abc', '/page?booking=' + 'a'.repeat(32), '/page?booking=x']) {
+  for (const url of ['/s/abc', '/g/code', '/he/s/abc', '/page?booking=' + 'a'.repeat(32), '/page?booking=x', '/appointment?a=cancel&t=abc']) {
     it(`injects nothing on ${url}`, () => {
       window.history.replaceState({}, '', url);
       const done = injectConsentScripts([necessary, marketing], all);
@@ -695,6 +696,24 @@ describe('site scripts on capability pages', () => {
       expect(document.getElementById('cap-marketing')).toBeNull();
     });
   }
+
+  it('the booking guest-link token t counts as a capability, the a hint alone and utm do not', () => {
+    expect(searchCarriesCapability('?a=cancel&t=abc123')).toBe(true);
+    expect(searchCarriesCapability('?a=move&t=x')).toBe(true);
+    expect(searchCarriesCapability('?t=abc')).toBe(true);
+    expect(searchCarriesCapability('?a=cancel')).toBe(false);
+    expect(searchCarriesCapability('?utm_source=x')).toBe(false);
+  });
+
+  it('no pixel and no GA on /appointment?a=cancel&t=abc', async () => {
+    window.history.replaceState({}, '', '/appointment?a=cancel&t=abc');
+    expect(loadMetaPixel('123456789')).toBe(false);
+    expect(loadGoogleAnalytics('G-ABC123')).toBe(false);
+    geo('IL');
+    await mount();
+    expect(fbScripts()).toBe(0);
+    expect(gaScripts()).toBe(0);
+  });
 
   it('still injects necessary scripts on a normal page', () => {
     window.history.replaceState({}, '', '/page');
@@ -773,6 +792,22 @@ describe('route changes after load', () => {
     await mount();
     act(() => window.history.pushState({}, '', '/page?booking=' + 'a'.repeat(32)));
     expect(pageActions.assign).toHaveBeenCalledTimes(1);
+  });
+
+  it('pushState to /appointment?a=move&t=abc after a tool loaded is a hard navigation', async () => {
+    window.history.replaceState({}, '', '/about');
+    geo('IL');
+    await mount();
+    act(() => window.history.pushState({}, '', '/appointment?a=move&t=abc'));
+    expect(pageActions.assign).toHaveBeenCalledTimes(1);
+  });
+
+  it('pushState with only utm_source stays soft', async () => {
+    window.history.replaceState({}, '', '/about');
+    geo('IL');
+    await mount();
+    act(() => window.history.pushState({}, '', '/about?utm_source=x'));
+    expect(pageActions.assign).not.toHaveBeenCalled();
   });
 
   it('pushState to a normal page calls the original', async () => {
