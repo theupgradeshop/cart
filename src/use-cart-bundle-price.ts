@@ -13,25 +13,8 @@ export interface CartBundlePriceResult {
   suppressionReason: string | null;
 }
 
-// The evaluator this endpoint runs on (`src/lib/store/bundle-rule-evaluator.ts` in the
-// dashboard) is quantity-blind: `ChosenItem` is `{ id, listPriceMinor, owned }` — the word
-// `quantity` does not appear in that file, and the price route builds one `ChosenItem` per
-// product row regardless of how many units a composition asks for. A `CartItemComposition`
-// CAN carry an included item with `quantity > 1`. Sending such a composition to this
-// endpoint prices it as though every item were a single unit — a total LOWER than what the
-// buyer will actually be charged. This hook refuses to request or display a price for that
-// composition until the evaluator is quantity-aware (tracked separately in
-// cowork/backlog/commerce-payments.md). Do not remove this refusal without fixing the
-// evaluator first.
-const UNPRICEABLE_REASON =
-  'The bundle-rules price evaluator has no quantity field (ChosenItem is { id, listPriceMinor, ' +
-  'owned }) — every chosen item prices as a single unit. A composition with an included item ' +
-  'quantity greater than 1 would silently under-price if requested as-is, so no price is ' +
-  'requested or shown for it until the evaluator becomes quantity-aware.';
-
 export type CartBundlePriceEntry =
   | { status: 'not-composed' }
-  | { status: 'unpriceable'; reason: string }
   | { status: 'not-loaded' }
   | { status: 'priced'; result: CartBundlePriceResult };
 
@@ -51,10 +34,6 @@ interface CacheEntry {
  */
 const bundlePriceCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 60_000;
-
-function hasQuantityAboveOne(includedItems: CartItemComposition['includedItems']): boolean {
-  return includedItems.some(i => i.quantity > 1);
-}
 
 // Content key for a composition — sorted so two compositions with the same items in a
 // different order share a cache entry, and so two DIFFERENT compositions (different bundle,
@@ -85,12 +64,12 @@ async function fetchBundlePrice(
     return cached.promise;
   }
 
-  const productSlugs = composition.includedItems.map(i => i.slug);
+  const items = composition.includedItems.map(i => ({ productSlug: i.slug, quantity: i.quantity }));
 
   const promise = fetch(`${apiBaseUrl}/api/public/store/bundle-rules/price`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ domain, productSlugs }),
+    body: JSON.stringify({ domain, items }),
   })
     .then(res => {
       if (!res.ok) throw new Error(`Bundle price API ${res.status}`);
@@ -135,9 +114,7 @@ async function fetchBundlePrice(
  * `priceFor(slug, variantId?)` looks up a line's price by its cart identity (the same
  * `slug`+`variantId` key `cart-reducer.ts` uses):
  * - `{ status: 'not-composed' }` — the line has no `composition`, or doesn't exist.
- * - `{ status: 'unpriceable', reason }` — the composition has an included item with
- *   `quantity > 1`; see the evaluator limitation above. No request was made for it.
- * - `{ status: 'not-loaded' }` — priceable, but the request hasn't resolved yet (or the
+ * - `{ status: 'not-loaded' }` — the request hasn't resolved yet (or the
  *   last attempt failed — fail-open, so a failure looks the same as "still pending" and never
  *   renders a stale or partial figure).
  * - `{ status: 'priced', result }` — a server-computed price is available.
@@ -155,12 +132,9 @@ export function useCartBundlePrice(domain: string): {
   const { items } = cartCtx;
   const { apiBaseUrl } = config;
 
-  // Only lines whose composition is priceable ever enter the fetch path — an item with
-  // quantity > 1 anywhere in it is excluded here, before any request is built, per the
-  // refusal above.
-  const priceableLines = items.filter(
-    i => i.composition && !hasQuantityAboveOne(i.composition.includedItems)
-  );
+  // Every line carrying a composition is priced; each included item's quantity travels in
+  // the request (`items: [{ productSlug, quantity }]`), and the server's evaluator multiplies it.
+  const priceableLines = items.filter(i => i.composition);
 
   const [results, setResults] = useState<Map<string, CartBundlePriceResult>>(new Map());
   const [loadingKeys, setLoadingKeys] = useState<Set<string>>(new Set());
@@ -227,9 +201,6 @@ export function useCartBundlePrice(domain: string): {
     const key = itemKey(slug, variantId);
     const line = items.find(i => itemKey(i.slug, i.variantId) === key);
     if (!line?.composition) return { status: 'not-composed' };
-    if (hasQuantityAboveOne(line.composition.includedItems)) {
-      return { status: 'unpriceable', reason: UNPRICEABLE_REASON };
-    }
     const contentKey = compositionKey(line.composition.bundleSlug, line.composition.includedItems);
     const result = results.get(contentKey);
     if (result) return { status: 'priced', result };

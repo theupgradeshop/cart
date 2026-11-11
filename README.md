@@ -176,8 +176,7 @@ of:
 
 - `{ status: 'not-composed' }` — the line has no `composition`, or no line
   with that identity exists.
-- `{ status: 'unpriceable', reason }` — **the refusal.** See below.
-- `{ status: 'not-loaded' }` — priceable, but the request hasn't resolved
+- `{ status: 'not-loaded' }` — the request hasn't resolved
   yet. A prior failed attempt for this exact composition also reports this
   state (fail-open — see below), so "still pending" and "last attempt
   failed" are intentionally indistinguishable from the outside: neither ever
@@ -186,26 +185,13 @@ of:
   `result` is `{ totalMinor, discountMinor, appliedRuleId, appliedRuleName,
   basis, suppressionReason }`, passed straight through from the endpoint.
 
-**The refusal — read this before touching the quantity check.** The pricing
-engine behind this endpoint (`src/lib/store/bundle-rule-evaluator.ts` in the
-dashboard) is **quantity-blind**: its `ChosenItem` type is `{ id,
-listPriceMinor, owned }` — the word `quantity` does not appear anywhere in
-that file, and the price route builds one `ChosenItem` per product row
-regardless of how many units a composition asks for. A `CartItemComposition`
-*can* express an included item with `quantity` greater than one. Sending such
-a composition to this endpoint as-is would price it as though every item
-were a single unit — **a total lower than what the buyer will actually be
-charged.**
-
-So: if any `includedItems` entry in a composition has `quantity > 1`, this
-hook makes **no** request for it and reports `{ status: 'unpriceable',
-reason }` instead — never a stale or partial figure. This is a deliberate
-fail-closed stopgap on a money path, not an oversight; the evaluator gap
-itself is filed in `cowork/backlog/commerce-payments.md`. **Do not remove
-this refusal without first making the evaluator quantity-aware, and do not
-work around it by computing a price client-side** — the evaluator (rule
-selection, discount math, suppression) is the only place that can price a
-bundle rule correctly.
+**Quantity (v1.10.0).** Each included item's `quantity` is sent in the request body as
+`items: [{ productSlug, quantity }]`, and the dashboard's evaluator multiplies it: selection size is the sum of
+quantities and list prices are weighted by them. (Before v1.10.0 the evaluator was quantity-blind, so the hook refused to
+price any composition with an item of quantity above 1; that refusal and the `unpriceable` status are gone.) The `items`
+shape needs a dashboard that accepts it; an older dashboard answers 400, which this hook treats as fail-open (no price
+shown), never as a quantity-blind price. Do not compute a price client-side: the evaluator is the only place that can
+price a bundle rule correctly.
 
 **Fail open**, same register as `useCartPrerequisites`: a non-ok response, a
 thrown fetch, or an unparseable body all resolve to no price and no thrown

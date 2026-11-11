@@ -121,62 +121,78 @@ describe('useCartBundlePrice', () => {
     expect(fetch).toHaveBeenCalledWith('https://api.test/api/public/store/bundle-rules/price', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ domain: 'test-positive.com', productSlugs: ['widget-a', 'widget-b'] }),
+      body: JSON.stringify({
+        domain: 'test-positive.com',
+        items: [
+          { productSlug: 'widget-a', quantity: 1 },
+          { productSlug: 'widget-b', quantity: 1 },
+        ],
+      }),
     });
 
     const entry = result.current.priceFor('starter-bundle');
     expect(entry).toEqual({ status: 'priced', result: priceResponse });
   });
 
-  it('REFUSAL: a composition with an included item of quantity 2 issues no request and is distinguishable from "not loaded yet"', async () => {
+  it('QUANTITY: a composition with an included item of quantity 2 is requested with that quantity and its price is shown', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => priceResponse,
+    } as Response);
     seedCart('over-quantity', [overQuantityLine]);
 
-    const { result } = renderHook(() => useCartBundlePrice('test-refusal.com'), {
+    const { result } = renderHook(() => useCartBundlePrice('test-quantity.com'), {
       wrapper: makeWrapper('over-quantity'),
     });
 
-    // Give any effect a tick to (not) fire a request.
-    await new Promise(r => setTimeout(r, 0));
+    await waitFor(() => expect(result.current.priceFor('deluxe-bundle').status).toBe('priced'));
 
-    expect(fetch).not.toHaveBeenCalled();
-    expect(result.current.isLoading).toBe(false);
-
-    const entry = result.current.priceFor('deluxe-bundle');
-    expect(entry.status).toBe('unpriceable');
-    if (entry.status === 'unpriceable') {
-      expect(entry.reason).toMatch(/quantity/i);
-    }
-    // Distinct from the "still pending" state a priceable-but-unresolved line would report.
-    expect(entry.status).not.toBe('not-loaded');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith('https://api.test/api/public/store/bundle-rules/price', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        domain: 'test-quantity.com',
+        items: [
+          { productSlug: 'widget-a', quantity: 2 },
+          { productSlug: 'widget-b', quantity: 1 },
+        ],
+      }),
+    });
+    expect(result.current.priceFor('deluxe-bundle')).toEqual({ status: 'priced', result: priceResponse });
   });
 
-  it('REFUSAL vs PENDING: an unpriceable line and a still-loading priceable line report different statuses side by side', async () => {
-    // Never resolves during this test — the priceable line stays pending.
+  it('QUANTITY vs PENDING: an over-quantity line and a quantity-1 line are both requested, and both stay not-loaded while pending', async () => {
+    // Never resolves during this test.
     vi.mocked(fetch).mockReturnValue(new Promise(() => {}));
 
-    seedCart('mixed-refusal-pending', [overQuantityLine, composedLine]);
+    seedCart('mixed-quantities', [overQuantityLine, composedLine]);
 
     const { result } = renderHook(() => useCartBundlePrice('test-mixed.com'), {
-      wrapper: makeWrapper('mixed-refusal-pending'),
+      wrapper: makeWrapper('mixed-quantities'),
     });
 
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
 
-    expect(result.current.priceFor('deluxe-bundle')).toEqual({
-      status: 'unpriceable',
-      reason: expect.stringMatching(/quantity/i),
-    });
+    expect(result.current.priceFor('deluxe-bundle')).toEqual({ status: 'not-loaded' });
     expect(result.current.priceFor('starter-bundle')).toEqual({ status: 'not-loaded' });
     expect(result.current.isLoading).toBe(true);
+  });
 
-    // Only the priceable composition's items were requested — the refused one never
-    // contributed to the request body.
-    expect(fetch).toHaveBeenCalledWith(
-      'https://api.test/api/public/store/bundle-rules/price',
-      expect.objectContaining({
-        body: JSON.stringify({ domain: 'test-mixed.com', productSlugs: ['widget-a', 'widget-b'] }),
-      })
-    );
+  it('QUANTITY keys the cache: the same slugs with different quantities are two requests, not one shared price', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => priceResponse,
+    } as Response);
+
+    seedCart('quantity-cache', [overQuantityLine, { ...overQuantityLine, slug: 'deluxe-bundle-single', composition: { bundleSlug: 'deluxe-bundle', includedItems: [{ slug: 'widget-a', quantity: 1 }, { slug: 'widget-b', quantity: 1 }] } }]);
+
+    const { result } = renderHook(() => useCartBundlePrice('test-quantity-cache.com'), {
+      wrapper: makeWrapper('quantity-cache'),
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it('CACHING/DEDUP: two lines sharing the same composition content issue exactly one request', async () => {

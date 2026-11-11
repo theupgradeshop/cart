@@ -570,12 +570,8 @@ function useCartPrerequisites(domain, buyerEmail) {
 
 // src/use-cart-bundle-price.ts
 import { useContext as useContext5, useEffect as useEffect5, useState as useState5 } from "react";
-var UNPRICEABLE_REASON = "The bundle-rules price evaluator has no quantity field (ChosenItem is { id, listPriceMinor, owned }) \u2014 every chosen item prices as a single unit. A composition with an included item quantity greater than 1 would silently under-price if requested as-is, so no price is requested or shown for it until the evaluator becomes quantity-aware.";
 var bundlePriceCache = /* @__PURE__ */ new Map();
 var CACHE_TTL_MS4 = 6e4;
-function hasQuantityAboveOne(includedItems) {
-  return includedItems.some((i) => i.quantity > 1);
-}
 function compositionKey(bundleSlug, includedItems) {
   const itemsPart = includedItems.map((i) => `${i.slug}:${i.quantity}`).sort().join(",");
   return `${bundleSlug}::${itemsPart}`;
@@ -590,11 +586,11 @@ async function fetchBundlePrice(apiBaseUrl, domain, composition) {
   if (cached?.promise) {
     return cached.promise;
   }
-  const productSlugs = composition.includedItems.map((i) => i.slug);
+  const items = composition.includedItems.map((i) => ({ productSlug: i.slug, quantity: i.quantity }));
   const promise = fetch(`${apiBaseUrl}/api/public/store/bundle-rules/price`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ domain, productSlugs })
+    body: JSON.stringify({ domain, items })
   }).then((res) => {
     if (!res.ok) throw new Error(`Bundle price API ${res.status}`);
     return res.json();
@@ -626,9 +622,7 @@ function useCartBundlePrice(domain) {
   if (!cartCtx) throw new Error("useCartBundlePrice must be used inside <CartProvider>");
   const { items } = cartCtx;
   const { apiBaseUrl } = config;
-  const priceableLines = items.filter(
-    (i) => i.composition && !hasQuantityAboveOne(i.composition.includedItems)
-  );
+  const priceableLines = items.filter((i) => i.composition);
   const [results, setResults] = useState5(/* @__PURE__ */ new Map());
   const [loadingKeys, setLoadingKeys] = useState5(/* @__PURE__ */ new Set());
   const [error, setError] = useState5(null);
@@ -674,9 +668,6 @@ function useCartBundlePrice(domain) {
     const key = itemKey(slug, variantId);
     const line = items.find((i) => itemKey(i.slug, i.variantId) === key);
     if (!line?.composition) return { status: "not-composed" };
-    if (hasQuantityAboveOne(line.composition.includedItems)) {
-      return { status: "unpriceable", reason: UNPRICEABLE_REASON };
-    }
     const contentKey = compositionKey(line.composition.bundleSlug, line.composition.includedItems);
     const result = results.get(contentKey);
     if (result) return { status: "priced", result };

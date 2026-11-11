@@ -166,9 +166,6 @@ interface CartBundlePriceResult {
 type CartBundlePriceEntry = {
     status: 'not-composed';
 } | {
-    status: 'unpriceable';
-    reason: string;
-} | {
     status: 'not-loaded';
 } | {
     status: 'priced';
@@ -186,9 +183,7 @@ type CartBundlePriceEntry = {
  * `priceFor(slug, variantId?)` looks up a line's price by its cart identity (the same
  * `slug`+`variantId` key `cart-reducer.ts` uses):
  * - `{ status: 'not-composed' }` — the line has no `composition`, or doesn't exist.
- * - `{ status: 'unpriceable', reason }` — the composition has an included item with
- *   `quantity > 1`; see the evaluator limitation above. No request was made for it.
- * - `{ status: 'not-loaded' }` — priceable, but the request hasn't resolved yet (or the
+ * - `{ status: 'not-loaded' }` — the request hasn't resolved yet (or the
  *   last attempt failed — fail-open, so a failure looks the same as "still pending" and never
  *   renders a stale or partial figure).
  * - `{ status: 'priced', result }` — a server-computed price is available.
