@@ -5,9 +5,11 @@ export {
   getOrderForThankYou,
   POLL_INTERVAL_MS,
   POLL_MAX_REQUESTS,
+  SLOW_WATCH_GAPS_MS,
+  watchOrderForThankYou,
   TERMINAL_FINANCIAL_STATUSES,
 } from './thank-you';
-export type { GetOrderForThankYouOptions } from './thank-you';
+export type { GetOrderForThankYouOptions, WatchOrderForThankYouOptions } from './thank-you';
 export { useThankYouOrder } from './use-thank-you-order';
 export type { UseThankYouOrderOptions, UseThankYouOrderResult } from './use-thank-you-order';
 export { useLinkCoupon } from './use-link-coupon';

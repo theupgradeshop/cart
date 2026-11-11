@@ -200,6 +200,13 @@ declare const POLL_INTERVAL_MS = 4000;
 /** 12 requests per visit, inside the orders route's 30 per 15 minutes (a reload adds up to 12 more). */
 declare const POLL_MAX_REQUESTS = 12;
 /**
+ * The "slow watch" that `useThankYouOrder` starts when the short poll above ends with the order still pending: one
+ * request after each gap (15 s, 30 s, 60 s, then 120 s x5), i.e. at most 8 more requests over 705 s (about 11.75 minutes).
+ * Short poll 12 + slow watch 8 = 20, under the orders route's 30 per 15 minutes per IP + order, which leaves room for the
+ * pay pop-up's own poll. Every request uses one of the 8, a 429 included; a 429 also doubles the next gap (the gap, not the sum). Gaps are only waited while the tab is visible.
+ */
+declare const SLOW_WATCH_GAPS_MS: readonly number[];
+/**
  * `financialStatus` values after which the order will not change by itself.
  * `partially_paid` is deliberately NOT terminal: it only comes from manual payments, never from a
  * template checkout, and if it ever shows up the page keeps polling and ends in `not_received`.
@@ -227,6 +234,28 @@ interface GetOrderForThankYouOptions {
  * `not_received`. The token is cleared only after a terminal status. `onPaid` fires only on `paid`.
  */
 declare function getOrderForThankYou(orderId: string, opts: GetOrderForThankYouOptions): Promise<ThankYouResult>;
+interface WatchOrderForThankYouOptions {
+    domain: string;
+    apiBaseUrl: string;
+    locale?: string;
+    /** Called once when a terminal PAID status is seen (not while the page is in a same-origin frame, which the hook already excludes). */
+    onPaid?: (order: OrderThin | OrderFull) => void;
+    /** Called after each non-terminal answer. */
+    onUpdate?: (order: OrderThin | OrderFull) => void;
+    /** Aborts the watch (unmount or a changed orderId): no more requests, no onPaid, no token clear, resolves with `null`. */
+    signal?: AbortSignal;
+    /** Keep the ownership token after a terminal status. Default false. */
+    keepToken?: boolean;
+}
+/**
+ * The slow watch (see `SLOW_WATCH_GAPS_MS`): after each gap, one request, at most `SLOW_WATCH_GAPS_MS.length` in all.
+ * While the tab is hidden it makes no request; when it becomes visible it checks at once (that check uses one of the
+ * slots) and then goes on with the schedule. Every request uses one of the slots, a 429
+ * included; a 429 is not a failure, it also doubles the next gap. Any other error likewise uses its slot and the watch goes on. A terminal status ends it (token cleared unless `keepToken`, `onPaid` on `paid`);
+ * a 404 ends it as `not_found`. If the budget runs out the result is `not_received` with the latest order. An abort resolves `null`.
+ * `requests` in the result counts the slow-watch requests only.
+ */
+declare function watchOrderForThankYou(orderId: string, opts: WatchOrderForThankYouOptions): Promise<ThankYouResult | null>;
 
 interface UseThankYouOrderOptions {
     domain: string;
@@ -236,14 +265,23 @@ interface UseThankYouOrderOptions {
     onPaid?: (order: OrderThin | OrderFull) => void;
     /** The page language; sent so the dashboard's `paymentMessage` is written in it. */
     locale?: string;
+    /**
+     * Default true. When the short poll ends with the order still pending (`not_received`), keep checking on the slow
+     * watch (`SLOW_WATCH_GAPS_MS`, at most 8 more requests over about 12 minutes) so a late gateway confirmation still
+     * reaches `paid` and `onPaid`. `false` stops after the short poll, exactly as before.
+     */
+    keepWatching?: boolean;
 }
 type UseThankYouOrderResult = {
     status: 'confirming';
     order: OrderThin | OrderFull | null;
-} | ({
+}
+/** `watching` is true only while the slow watch is running after a `not_received` result; otherwise the key is absent. */
+ | ({
     status: 'done';
+    watching?: boolean;
 } & ThankYouResult);
-/** Drives the thank-you page: `confirming` while polling, then `done` with one of the states. Inside a same-origin frame it never polls. */
+/** Drives the thank-you page: `confirming` while polling, then `done` with one of the states (a `not_received` may later turn `paid` while `watching`, unless `keepWatching` is false). Inside a same-origin frame it never polls. */
 declare function useThankYouOrder(orderId: string | null, opts: UseThankYouOrderOptions): UseThankYouOrderResult;
 
 interface LinkCouponLine {
@@ -427,4 +465,4 @@ declare function maxInstallmentsFor(total: number, capabilities: Pick<CheckoutCa
     installmentRules?: InstallmentRule[];
 }): number;
 
-export { type AppliedCoupon, CHECKOUT_ERROR_KEYS, type CartDoorItem, type CheckoutCapabilities, type CheckoutCustomer, CheckoutError, type CheckoutErrorKey, type CheckoutNext, type CheckoutTotals, type CheckoutV2Response, type CouponValidation, type GetOrderForThankYouOptions, type InstallmentRule, type LinkCouponLine, MAX_COUPON_CODES, type OrderFull, type OrderItemThin, type OrderThin, POLL_INTERVAL_MS, POLL_MAX_REQUESTS, type StartCartCheckoutInput, type StartCheckoutInput, type StartCheckoutResult, type StartFunnelCheckoutInput, TERMINAL_FINANCIAL_STATUSES, type ThankYouResult, type ThankYouState, type UseLinkCouponOptions, type UseThankYouOrderOptions, type UseThankYouOrderResult, buildCartDoorBody, buildCouponValidateBody, buildFunnelDoorBody, checkoutErrorKey, getOrderForThankYou, isCheckoutError, maxInstallmentsFor, parseCouponValidation, startCheckout, useLinkCoupon, useThankYouOrder };
+export { type AppliedCoupon, CHECKOUT_ERROR_KEYS, type CartDoorItem, type CheckoutCapabilities, type CheckoutCustomer, CheckoutError, type CheckoutErrorKey, type CheckoutNext, type CheckoutTotals, type CheckoutV2Response, type CouponValidation, type GetOrderForThankYouOptions, type InstallmentRule, type LinkCouponLine, MAX_COUPON_CODES, type OrderFull, type OrderItemThin, type OrderThin, POLL_INTERVAL_MS, POLL_MAX_REQUESTS, SLOW_WATCH_GAPS_MS, type StartCartCheckoutInput, type StartCheckoutInput, type StartCheckoutResult, type StartFunnelCheckoutInput, TERMINAL_FINANCIAL_STATUSES, type ThankYouResult, type ThankYouState, type UseLinkCouponOptions, type UseThankYouOrderOptions, type UseThankYouOrderResult, type WatchOrderForThankYouOptions, buildCartDoorBody, buildCouponValidateBody, buildFunnelDoorBody, checkoutErrorKey, getOrderForThankYou, isCheckoutError, maxInstallmentsFor, parseCouponValidation, startCheckout, useLinkCoupon, useThankYouOrder, watchOrderForThankYou };

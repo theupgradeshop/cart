@@ -384,6 +384,20 @@ const r = await startCheckout({ door: 'cart', domain, apiBaseUrl, customer, item
   and the latest answer had a non-null `paymentState`, the result also carries `paymentState` and (when non-empty)
   `paymentMessage`; the `state` values are unchanged and a result without a payment state has neither key. While
   `confirming`, `order.paymentMessage` is available on the latest order. The fields also ride the terminal `declined` result. The package never maps a state to text itself. The template, for `paymentState` `paid_not_applied` (payment received, not applied), shows its confirming heading plus the dashboard sentence in both `declined` and `not_received`, and no back-to-checkout button, because a second payment would be the risk.
+- Slow watch (v1.9.0, customer-websites-d7d1 item 2): `useThankYouOrder` no longer gives up when the short poll above ends with the order still
+  pending. Unless `keepWatching: false` is passed (default `true`), the hook returns `{ status: 'done', state: 'not_received', watching: true, ... }`
+  and goes on checking on `SLOW_WATCH_GAPS_MS` (15 s, 30 s, 60 s, then 120 s x5): one request after each gap, at most 8 more
+  requests over 705 s (about 11.75 minutes). If the order turns `paid` meanwhile, the result becomes `paid` and `onPaid` fires exactly once
+  (the token is cleared as after a short-poll terminal status); `failed`/`cancelled` and `refunded` end it as `declined`/`refunded`; a 404 as
+  `not_found`. When the 8 requests are used up the result is `not_received` again, without `watching` (the key is only present while
+  the watch runs). While the tab is hidden (`document.visibilityState`) no request is made; on becoming visible it checks once at once (that
+  check is one of the 8) and then the schedule resumes. Every request, a 429 included, uses one of the 8; a 429 is not a failure and also doubles the next gap only. Any other error likewise uses its slot
+  and the watch goes on. Unmount or a changed `orderId` aborts it (no more requests, no `onPaid`). `keepWatching: false` is exactly the
+  old behaviour (no `watching` key, no extra request). The package renders and says nothing: the page decides what `watching` looks like.
+  Request budget per buyer, IP and order: short poll 12 + slow watch 8 = 20, under the orders route's 30 per 15 minutes.
+  When the pay pop-up already ran its full 14 requests in the same 15-minute window, the total (34) can pass the route's 30
+  (a reload adds up to 12 more); the route then answers 429, which the watch treats as a doubled gap, not a failure. Also exported:
+  `watchOrderForThankYou(orderId, opts)` (the watch on its own; resolves `null` when aborted) and `SLOW_WATCH_GAPS_MS`.
 - `usePayFrame({ orderId, payUrl, successUrl, cancelUrl, domain, apiBaseUrl, open, onCancelled, onClose, navigateTop })`
   (v1.3.0; its own entry `@upgradeshop/cart/checkout/pay-frame` since v1.3.1, `'use client'`, so a site loads it lazily with the pop-up) drives the payment pop-up, behaviour only: the component renders the iframe (`src=payUrl`,
   `ref={frameRef}`, `onLoad={onFrameLoad}`) and a Back button calling `close()`. On each iframe load a same-origin

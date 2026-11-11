@@ -26,6 +26,7 @@ __export(index_exports, {
   MAX_COUPON_CODES: () => MAX_COUPON_CODES,
   POLL_INTERVAL_MS: () => POLL_INTERVAL_MS,
   POLL_MAX_REQUESTS: () => POLL_MAX_REQUESTS,
+  SLOW_WATCH_GAPS_MS: () => SLOW_WATCH_GAPS_MS,
   TERMINAL_FINANCIAL_STATUSES: () => TERMINAL_FINANCIAL_STATUSES,
   buildCartDoorBody: () => buildCartDoorBody,
   buildCouponValidateBody: () => buildCouponValidateBody,
@@ -37,7 +38,8 @@ __export(index_exports, {
   parseCouponValidation: () => parseCouponValidation,
   startCheckout: () => startCheckout,
   useLinkCoupon: () => useLinkCoupon,
-  useThankYouOrder: () => useThankYouOrder
+  useThankYouOrder: () => useThankYouOrder,
+  watchOrderForThankYou: () => watchOrderForThankYou
 });
 module.exports = __toCommonJS(index_exports);
 
@@ -288,6 +290,7 @@ async function startCheckout(input) {
 // src/checkout/thank-you.ts
 var POLL_INTERVAL_MS = 4e3;
 var POLL_MAX_REQUESTS = 12;
+var SLOW_WATCH_GAPS_MS = [15e3, 3e4, 6e4, 12e4, 12e4, 12e4, 12e4, 12e4];
 var TERMINAL_FINANCIAL_STATUSES = ["paid", "failed", "cancelled", "refunded"];
 function isInSameOriginFrame() {
   try {
@@ -333,11 +336,14 @@ function sleep(ms, signal) {
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
-async function getOrderForThankYou(orderId, opts) {
+function orderRequest(orderId, opts) {
   const base = opts.apiBaseUrl.replace(/\/+$/, "");
   const token = readOwnershipToken(orderId);
   const url = `${base}/api/public/orders/${encodeURIComponent(orderId)}?domain=${encodeURIComponent(opts.domain)}${opts.locale ? `&locale=${encodeURIComponent(opts.locale)}` : ""}`;
-  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  return { url, headers: token ? { Authorization: `Bearer ${token}` } : {} };
+}
+async function getOrderForThankYou(orderId, opts) {
+  const { url, headers } = orderRequest(orderId, opts);
   const framed = isInSameOriginFrame();
   let requests = 0;
   let last = null;
@@ -383,6 +389,72 @@ async function getOrderForThankYou(orderId, opts) {
   }
   return { state: "not_received", order: last, full, requests, ...paymentFields(last) };
 }
+function whenVisible(signal) {
+  return new Promise((resolve) => {
+    if (typeof document === "undefined" || document.visibilityState !== "hidden" || signal?.aborted) {
+      resolve();
+      return;
+    }
+    const done = () => {
+      document.removeEventListener("visibilitychange", onChange);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const onChange = () => {
+      if (document.visibilityState !== "hidden") done();
+    };
+    document.addEventListener("visibilitychange", onChange);
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
+async function watchOrderForThankYou(orderId, opts) {
+  const { signal } = opts;
+  let requests = 0;
+  let last = null;
+  let full = false;
+  let doubleNext = false;
+  for (let i = 0; i < SLOW_WATCH_GAPS_MS.length; i += 1) {
+    await sleep(SLOW_WATCH_GAPS_MS[i] * (doubleNext ? 2 : 1), signal);
+    doubleNext = false;
+    if (signal?.aborted) return null;
+    await whenVisible(signal);
+    if (signal?.aborted) return null;
+    requests += 1;
+    const { url, headers } = orderRequest(orderId, opts);
+    let res = null;
+    try {
+      res = await fetch(url, { headers, signal });
+    } catch {
+      res = null;
+    }
+    if (signal?.aborted) return null;
+    if (!res) continue;
+    if (res.status === 429) {
+      doubleNext = true;
+      continue;
+    }
+    if (res.status === 404) return { state: "not_found", order: null, full: false, requests };
+    if (!res.ok) continue;
+    let json = null;
+    try {
+      json = await res.json();
+    } catch {
+      json = null;
+    }
+    if (signal?.aborted) return null;
+    if (!json || typeof json.financialStatus !== "string") continue;
+    last = json;
+    full = "customerEmail" in json;
+    const state = stateFor(json.financialStatus);
+    if (state) {
+      if (!opts.keepToken) clearOwnershipToken(orderId);
+      if (state === "paid") safely(() => opts.onPaid?.(json));
+      return { state, order: json, full, requests, ...state === "declined" ? paymentFields(json) : {} };
+    }
+    safely(() => opts.onUpdate?.(json));
+  }
+  return { state: "not_received", order: last, full, requests, ...paymentFields(last) };
+}
 
 // src/checkout/use-thank-you-order.ts
 var import_react = require("react");
@@ -392,6 +464,7 @@ function useThankYouOrder(orderId, opts) {
     orderId ? { status: "confirming", order: null } : NO_ORDER
   );
   const { domain, apiBaseUrl, locale } = opts;
+  const keepWatching = opts.keepWatching !== false;
   const onPaidRef = (0, import_react.useRef)(opts.onPaid);
   onPaidRef.current = opts.onPaid;
   (0, import_react.useEffect)(() => {
@@ -411,13 +484,31 @@ function useThankYouOrder(orderId, opts) {
       onUpdate: (order) => {
         if (!ctl.signal.aborted) setState({ status: "confirming", order });
       }
-    }).then((result) => {
-      if (!ctl.signal.aborted) setState({ status: "done", ...result });
+    }).then(async (result) => {
+      if (ctl.signal.aborted) return;
+      if (result.state !== "not_received" || !keepWatching) {
+        setState({ status: "done", ...result });
+        return;
+      }
+      setState({ status: "done", ...result, watching: true });
+      const watched = await watchOrderForThankYou(orderId, {
+        domain,
+        apiBaseUrl,
+        locale,
+        onPaid: (order) => onPaidRef.current?.(order),
+        signal: ctl.signal
+      });
+      if (ctl.signal.aborted) return;
+      if (!watched) {
+        setState({ status: "done", ...result });
+        return;
+      }
+      setState({ status: "done", ...watched, requests: result.requests + watched.requests });
     }).catch(() => {
       if (!ctl.signal.aborted) setState({ status: "done", state: "not_received", order: null, full: false, requests: 0 });
     });
     return () => ctl.abort();
-  }, [orderId, domain, apiBaseUrl, locale]);
+  }, [orderId, domain, apiBaseUrl, locale, keepWatching]);
   return state;
 }
 
@@ -549,6 +640,7 @@ function maxInstallmentsFor(total, capabilities) {
   MAX_COUPON_CODES,
   POLL_INTERVAL_MS,
   POLL_MAX_REQUESTS,
+  SLOW_WATCH_GAPS_MS,
   TERMINAL_FINANCIAL_STATUSES,
   buildCartDoorBody,
   buildCouponValidateBody,
@@ -560,5 +652,6 @@ function maxInstallmentsFor(total, capabilities) {
   parseCouponValidation,
   startCheckout,
   useLinkCoupon,
-  useThankYouOrder
+  useThankYouOrder,
+  watchOrderForThankYou
 });
