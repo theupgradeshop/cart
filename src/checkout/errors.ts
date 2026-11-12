@@ -22,6 +22,8 @@ const KNOWN: ReadonlySet<string> = new Set<CheckoutErrorKey>([
   'upsell_unavailable',
   'installments_unavailable',
   'shipping_address_required',
+  'bundle_price_changed',
+  'bundle_item_unsupported',
 ]);
 
 /** Every key a site must have a sentence for. */
@@ -61,13 +63,16 @@ export class CheckoutError extends Error {
   readonly conflictsWith?: string[];
   /** Coupon refusals: the codes the server kept applied (typed before the refused one), with their shares. Never the server's sentence. */
   readonly coupons?: Array<{ code: string; discount: number }>;
+  /** `bundle_price_changed` only: the selection's current server total, in minor units, so the site can re-show the price. */
+  readonly totalMinor?: number;
 
-  constructor(key: CheckoutErrorKey, status: number, items?: string[], coupon?: CheckoutCouponRefusal) {
+  constructor(key: CheckoutErrorKey, status: number, items?: string[], coupon?: CheckoutCouponRefusal, totalMinor?: number) {
     super(key);
     if (items) this.items = items;
     if (coupon?.couponCode !== undefined) this.couponCode = coupon.couponCode;
     if (coupon?.conflictsWith !== undefined) this.conflictsWith = coupon.conflictsWith;
     if (coupon?.coupons !== undefined) this.coupons = coupon.coupons;
+    if (totalMinor !== undefined) this.totalMinor = totalMinor;
     this.name = 'CheckoutError';
     this.key = key;
     this.status = status;

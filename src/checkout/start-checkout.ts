@@ -60,13 +60,17 @@ export async function startCheckout(input: StartCheckoutInput): Promise<StartChe
   }
 
   if (!res.ok) {
-    const b = json && typeof json === 'object' ? (json as { code?: unknown; items?: unknown }) : {};
+    const b = json && typeof json === 'object' ? (json as { code?: unknown; items?: unknown; totalMinor?: unknown }) : {};
     const key = checkoutErrorKey(res.status, b.code);
     const items =
       key === 'product_unavailable' && Array.isArray(b.items) && b.items.every((i) => typeof i === 'string')
         ? (b.items as string[])
         : undefined;
-    throw new CheckoutError(key, res.status, items, COUPON_KEYS.has(key) ? couponRefusal(json) : undefined);
+    const totalMinor =
+      key === 'bundle_price_changed' && typeof b.totalMinor === 'number' && Number.isSafeInteger(b.totalMinor) && b.totalMinor >= 0
+        ? b.totalMinor
+        : undefined;
+    throw new CheckoutError(key, res.status, items, COUPON_KEYS.has(key) ? couponRefusal(json) : undefined, totalMinor);
   }
   const parsed = parseV2Response(json);
   if (!parsed) throw new CheckoutError('generic', res.status);

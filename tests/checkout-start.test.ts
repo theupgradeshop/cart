@@ -236,6 +236,33 @@ describe('startCheckout', () => {
     expect(c.items).toBeUndefined();
   });
 
+  it('bundle_price_changed: a 409 with a JSON body maps to its key and exposes totalMinor', async () => {
+    vi.stubGlobal('fetch', reply(409, { error: 'x', code: 'bundle_price_changed', totalMinor: 1250 }));
+    const e = await startCheckout(cartInput()).catch((x) => x);
+    expect(isCheckoutError(e)).toBe(true);
+    expect(e.key).toBe('bundle_price_changed');
+    expect(e.status).toBe(409);
+    expect(e.totalMinor).toBe(1250);
+    expect(CHECKOUT_ERROR_KEYS).toContain('bundle_price_changed');
+  });
+
+  it('totalMinor is read only for bundle_price_changed and only when a non-negative integer', async () => {
+    for (const bad of ['5', -1, 1.5, null]) {
+      vi.stubGlobal('fetch', reply(409, { error: 'x', code: 'bundle_price_changed', totalMinor: bad }));
+      expect((await startCheckout(cartInput()).catch((x) => x)).totalMinor).toBeUndefined();
+    }
+    vi.stubGlobal('fetch', reply(400, { error: 'x', code: 'invalid_request', totalMinor: 10 }));
+    expect((await startCheckout(cartInput()).catch((x) => x)).totalMinor).toBeUndefined();
+  });
+
+  it('bundle_item_unsupported maps to its own key', async () => {
+    vi.stubGlobal('fetch', reply(400, { error: 'x', code: 'bundle_item_unsupported' }));
+    const e = await startCheckout(cartInput()).catch((x) => x);
+    expect(e.key).toBe('bundle_item_unsupported');
+    expect(e.totalMinor).toBeUndefined();
+    expect(CHECKOUT_ERROR_KEYS).toContain('bundle_item_unsupported');
+  });
+
   it('isCheckoutError recognises the error regardless of which entry built it', async () => {
     vi.stubGlobal('fetch', reply(400, { error: 'x' }));
     expect(isCheckoutError(await startCheckout(cartInput()).catch((x) => x))).toBe(true);

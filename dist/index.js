@@ -33,6 +33,7 @@ __export(index_exports, {
   resolveCheckoutSelection: () => resolveCheckoutSelection,
   sameSet: () => sameSet,
   toComposedBundleCheckoutFragment: () => toComposedBundleCheckoutFragment,
+  toStoreBundlesCheckoutFragment: () => toStoreBundlesCheckoutFragment,
   useBundleOffer: () => useBundleOffer,
   useCart: () => useCart,
   useCartBundlePrice: () => useCartBundlePrice,
@@ -717,6 +718,23 @@ function toComposedBundleCheckoutFragment(composedBundle) {
   return { composedBundle: { courseIds: composedBundle.courseIds } };
 }
 
+// src/store-bundles-checkout.ts
+function toStoreBundlesCheckoutFragment(cartItems, priceFor) {
+  const composed = cartItems.filter((i) => i.composition);
+  if (composed.length === 0) return { ok: true, items: cartItems, storeBundles: void 0 };
+  const storeBundles = [];
+  for (const line of composed) {
+    if (line.quantity !== 1) return { ok: false, reason: "composed_quantity_unsupported" };
+    const priced = priceFor(line.slug, line.variantId);
+    if (priced.status !== "priced") return { ok: false, reason: "price_not_loaded" };
+    storeBundles.push({
+      items: line.composition.includedItems.map((i) => ({ productSlug: i.slug, quantity: i.quantity })),
+      expectedTotalMinor: priced.result.totalMinor
+    });
+  }
+  return { ok: true, items: cartItems.filter((i) => !i.composition), storeBundles };
+}
+
 // src/bundle-engine.ts
 function isEligible(offer, id) {
   return offer.eligible.includes(id);
@@ -1094,6 +1112,7 @@ function useBundleOffer(url) {
   resolveCheckoutSelection,
   sameSet,
   toComposedBundleCheckoutFragment,
+  toStoreBundlesCheckoutFragment,
   useBundleOffer,
   useCart,
   useCartBundlePrice,

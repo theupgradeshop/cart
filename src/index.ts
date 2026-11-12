@@ -19,6 +19,9 @@ export type {
   CartSuggestionsResponse,
 } from './types';
 export { toComposedBundleCheckoutFragment } from './composed-bundle';
+export { toStoreBundlesCheckoutFragment } from './store-bundles-checkout';
+export type { StoreBundlesCheckoutFragment, StoreBundlesFragmentRefusal } from './store-bundles-checkout';
+export type { StoreBundleCheckoutEntry } from './checkout/types';
 
 // Bundle pricing engine (courses-bundles storefront spec, U3) — pure, mirrors the
 // dashboard's server evaluator + guard exactly. See src/bundle-engine.ts.

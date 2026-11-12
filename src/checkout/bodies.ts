@@ -20,6 +20,7 @@ export function buildCartDoorBody(input: StartCartCheckoutInput) {
     domain: input.domain,
     customer: compact({ ...input.customer }),
     items: input.items.map((i) => compact({ ...i })),
+    storeBundles: Array.isArray(input.storeBundles) && input.storeBundles.length > 0 ? input.storeBundles : undefined,
     couponCode: input.couponCode,
     couponCodes: manyCodes(input.couponCodes),
     language: input.language,

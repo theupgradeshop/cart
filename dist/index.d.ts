@@ -208,6 +208,44 @@ declare function toComposedBundleCheckoutFragment(composedBundle: ComposedCourse
 } | undefined;
 
 /**
+ * One edited-bundle selection of a store bundle rule, sent beside `items` (v1.11.0). The dashboard prices it with the
+ * same function as `POST /api/public/store/bundle-rules/price` and refuses the order (`bundle_price_changed`) when its
+ * own total differs from `expectedTotalMinor`, the figure the buyer was shown. Never a price the server trusts.
+ */
+interface StoreBundleCheckoutEntry {
+    items: Array<{
+        productSlug: string;
+        quantity: number;
+    }>;
+    /** The total the cart showed for this selection, in minor units (`useCartBundlePrice`'s `totalMinor`). */
+    expectedTotalMinor: number;
+}
+
+type StoreBundlesFragmentRefusal = 
+/** A composed line's server price is not loaded (pending, or its last attempt failed): never send a body without the figure. */
+'price_not_loaded'
+/** A composed line with a quantity other than 1: a composition is one bundle, copies are not defined. */
+ | 'composed_quantity_unsupported';
+type StoreBundlesCheckoutFragment = {
+    ok: true;
+    /** The cart lines that are NOT composed: these are the checkout request's `items`. The same array when there is no composed line. */
+    items: CartItem[];
+    /** One entry per composed line, or undefined when the cart has none (nothing is sent). */
+    storeBundles: StoreBundleCheckoutEntry[] | undefined;
+} | {
+    ok: false;
+    reason: StoreBundlesFragmentRefusal;
+};
+/**
+ * Splits a cart into the checkout body's `items` and `storeBundles` (v1.11.0). A line carrying a `composition` (an
+ * edited store bundle) leaves `items` and becomes `{ items: [{ productSlug, quantity }], expectedTotalMinor }`, where
+ * the figure is the server price `useCartBundlePrice`'s `priceFor` returned for that line. The dashboard re-prices the
+ * selection itself and refuses the order if its total differs, so this figure is a guard against a changed rule, never
+ * a price. A cart with no composed line comes back unchanged.
+ */
+declare function toStoreBundlesCheckoutFragment(cartItems: CartItem[], priceFor: (slug: string, variantId?: string) => CartBundlePriceEntry): StoreBundlesCheckoutFragment;
+
+/**
  * Pure, framework-free bundle pricing engine for course bundles (D3,
  * `2026-09-27-course-bundles-storefront-and-pe-block.md`, Unit U3).
  *
@@ -522,4 +560,4 @@ declare function resolveCheckoutSelection(params: {
     quote: Quote;
 }): string[];
 
-export { type FixedQuote as BundleFixedQuote, type Nudge as BundleNudge, type BundleOffer, type BundleOfferResponse, type BundleOfferStatus, type Quote as BundleQuote, type CartBundlePriceEntry, type CartBundlePriceResult, type CartContextValue, type CartItem, type CartItemComposition, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type CartSuggestionsResponse, type ComposedCourseBundleCartItem, type CountTier, type CourseDetail, type CoursesById, type EvaluationBasis, type FixedOffer, type FixedPriceTier, type FlatPercentageBasis, type Gap, type MatchedTierBasis, type MissingPrerequisite, type OfferPreset, type PerItemBasis, type PrerequisiteProduct, type PresetDerivedState, type ProductVariant, type RuleOffer, type UseBundleOfferResult, derivePresetState, fixedQuote, next, presetOwned, presetSelection, quote, quoteOne, quotePreset, resolveCheckoutSelection, sameSet, toComposedBundleCheckoutFragment, useBundleOffer, useCart, useCartBundlePrice, useCartPrerequisites, useCartProducts, useCartSuggestions };
+export { type FixedQuote as BundleFixedQuote, type Nudge as BundleNudge, type BundleOffer, type BundleOfferResponse, type BundleOfferStatus, type Quote as BundleQuote, type CartBundlePriceEntry, type CartBundlePriceResult, type CartContextValue, type CartItem, type CartItemComposition, type CartProduct, CartProvider, type CartSuggestion, type CartSuggestionProduct, type CartSuggestionType, type CartSuggestionsResponse, type ComposedCourseBundleCartItem, type CountTier, type CourseDetail, type CoursesById, type EvaluationBasis, type FixedOffer, type FixedPriceTier, type FlatPercentageBasis, type Gap, type MatchedTierBasis, type MissingPrerequisite, type OfferPreset, type PerItemBasis, type PrerequisiteProduct, type PresetDerivedState, type ProductVariant, type RuleOffer, type StoreBundleCheckoutEntry, type StoreBundlesCheckoutFragment, type StoreBundlesFragmentRefusal, type UseBundleOfferResult, derivePresetState, fixedQuote, next, presetOwned, presetSelection, quote, quoteOne, quotePreset, resolveCheckoutSelection, sameSet, toComposedBundleCheckoutFragment, toStoreBundlesCheckoutFragment, useBundleOffer, useCart, useCartBundlePrice, useCartPrerequisites, useCartProducts, useCartSuggestions };

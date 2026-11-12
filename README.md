@@ -55,6 +55,8 @@ that already carries one.**
   read into the same shape), so a site can decide on a shipping-address block.
 - `toComposedBundleCheckoutFragment(bundle)` (`src/composed-bundle.ts`) —
   see "Composed course bundle" below.
+- `toStoreBundlesCheckoutFragment(cartItems, priceFor)` (`src/store-bundles-checkout.ts`, v1.11.0) —
+  see "Edited store bundles at checkout" below.
 - Bundle pricing engine (`src/bundle-engine.ts`) and `useBundleOffer`
   (`src/use-bundle-offer.ts`) — see "Course bundle pricing engine" below.
 - `useCartSuggestions(domain)` (`src/use-cart-suggestions.ts`) — cross-sell /
@@ -248,6 +250,30 @@ turns the line into the checkout body fragment the dashboard's checkout
 route expects, `{ composedBundle: { courseIds } }`, or `undefined` when there
 is no such line — spread it straight into a checkout request body.
 
+## Edited store bundles at checkout (v1.11.0)
+
+A cart line carrying `composition` (an edited store bundle, priced by `useCartBundlePrice`) is NOT a plain product at
+checkout: the checkout request must send it as `storeBundles`, not as an `items` entry (an `items` entry would be
+charged as the bundle product at its own price). `toStoreBundlesCheckoutFragment(items, priceFor)` does the split:
+
+```ts
+const frag = toStoreBundlesCheckoutFragment(cartItems, priceFor); // priceFor from useCartBundlePrice(domain)
+if (!frag.ok) { /* 'price_not_loaded' | 'composed_quantity_unsupported': do not start checkout */ }
+else await startCheckout({ door: 'cart', ..., items: frag.items.map(toDoorItem), storeBundles: frag.storeBundles });
+```
+
+Each entry is `{ items: [{ productSlug, quantity }], expectedTotalMinor }`. `expectedTotalMinor` is the server total the
+cart showed; the dashboard re-prices the selection with the same function as the price route and refuses the order with
+`bundle_price_changed` when its total differs (a rule changed or went draft between preview and pay), and with
+`bundle_item_unsupported` for a subscription product, a variable product or a selection it cannot split into whole-cent
+unit prices. A cart with no composed line returns unchanged and sends no `storeBundles` key (body bytes identical to
+v1.10.0). A composed line whose quantity is not 1 is refused: a composition is one bundle.
+
+**Deploy order.** A site may take v1.11.0 only after the dashboard deploy that carries the store-bundle checkout. An older
+dashboard ignores the unknown `storeBundles` field, and the composed lines were removed from `items`: in a MIXED cart those
+lines go uncharged (the order holds only the loose lines), and a composed-only cart arrives with empty `items` and is refused
+with `cart_empty`. So the dashboard must ship first.
+
 ## Course bundle pricing engine (U3, courses-bundles storefront spec)
 
 `src/bundle-engine.ts` is a pure, framework-free client mirror of the
@@ -359,6 +385,7 @@ const r = await startCheckout({ door: 'cart', domain, apiBaseUrl, customer, item
   An unsafe `funnelNextUrl` does not fail the order: it becomes `null`.
 - Errors: `CheckoutError.key` is one of `CHECKOUT_ERROR_KEYS`; `product_unavailable` also carries `items`
   (the failing slugs).
+- Bundle refusals (new keys, also in `CHECKOUT_ERROR_KEYS`): `bundle_price_changed` (HTTP 409; `error.totalMinor?` is the selection's current total in minor units: re-show the price and let the buyer confirm) and `bundle_item_unsupported` (a product in the selection cannot be sold in a composed bundle). A 409 JSON body goes through the same mapping as any other refusal. Word the keys yourself.
 - `getOrderForThankYou(orderId, { domain, apiBaseUrl, onPaid, onUpdate, signal, locale })` sends the stored token as
   `Authorization: Bearer` (never in a URL), polls every 4 s up to 12 requests while the status is not terminal
   (`paid`, `failed`, `cancelled`, `refunded`), ends a 429 in `not_received`, clears the token only after a

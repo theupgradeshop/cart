@@ -54,6 +54,7 @@ function buildCartDoorBody(input) {
     domain: input.domain,
     customer: compact({ ...input.customer }),
     items: input.items.map((i) => compact({ ...i })),
+    storeBundles: Array.isArray(input.storeBundles) && input.storeBundles.length > 0 ? input.storeBundles : void 0,
     couponCode: input.couponCode,
     couponCodes: manyCodes(input.couponCodes),
     language: input.language,
@@ -104,7 +105,9 @@ var KNOWN = /* @__PURE__ */ new Set([
   "payment_unavailable",
   "upsell_unavailable",
   "installments_unavailable",
-  "shipping_address_required"
+  "shipping_address_required",
+  "bundle_price_changed",
+  "bundle_item_unsupported"
 ]);
 var CHECKOUT_ERROR_KEYS = [...KNOWN, "rate_limited", "network"];
 var BRAND = /* @__PURE__ */ Symbol.for("upgradeshop.checkout.error");
@@ -113,13 +116,14 @@ function isCheckoutError(e) {
 }
 var _a, _b;
 var CheckoutError = class extends (_b = Error, _a = BRAND, _b) {
-  constructor(key, status, items, coupon) {
+  constructor(key, status, items, coupon, totalMinor) {
     super(key);
     this[_a] = true;
     if (items) this.items = items;
     if (coupon?.couponCode !== void 0) this.couponCode = coupon.couponCode;
     if (coupon?.conflictsWith !== void 0) this.conflictsWith = coupon.conflictsWith;
     if (coupon?.coupons !== void 0) this.coupons = coupon.coupons;
+    if (totalMinor !== void 0) this.totalMinor = totalMinor;
     this.name = "CheckoutError";
     this.key = key;
     this.status = status;

@@ -10,6 +10,7 @@ export type {
   CheckoutErrorKey,
   CheckoutCustomer,
   CartDoorItem,
+  StoreBundleCheckoutEntry,
   StartCartCheckoutInput,
   StartFunnelCheckoutInput,
   StartCheckoutInput,

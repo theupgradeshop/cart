@@ -30,6 +30,7 @@ export type {
   AppliedCoupon,
   CheckoutCustomer,
   CartDoorItem,
+  StoreBundleCheckoutEntry,
   StartCartCheckoutInput,
   StartFunnelCheckoutInput,
   StartCheckoutInput,

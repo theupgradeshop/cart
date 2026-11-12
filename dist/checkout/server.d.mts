@@ -38,6 +38,10 @@ type CheckoutErrorKey = 'generic' | 'invalid_request' | 'order_not_found' | 'mod
  | 'too_many_coupons' | 'product_unavailable' | 'subscription_unavailable' | 'invalid_return_url' | 'payment_unavailable' | 'upsell_unavailable' | 'installments_unavailable'
 /** A physical order without a usable shipping address (dashboard follow-up, not yet emitted). */
  | 'shipping_address_required'
+/** HTTP 409: the composed bundle's price changed between preview and pay (the error carries `totalMinor`, the current total). */
+ | 'bundle_price_changed'
+/** A product in the composed bundle selection cannot be sold in a bundle. */
+ | 'bundle_item_unsupported'
 /** HTTP 429 from the door. */
  | 'rate_limited'
 /** The request never got an answer (offline, DNS, CORS). */
@@ -55,6 +59,19 @@ interface CartDoorItem {
     variantId?: string;
     occurrenceId?: string;
     addonProductIds?: string[];
+}
+/**
+ * One edited-bundle selection of a store bundle rule, sent beside `items` (v1.11.0). The dashboard prices it with the
+ * same function as `POST /api/public/store/bundle-rules/price` and refuses the order (`bundle_price_changed`) when its
+ * own total differs from `expectedTotalMinor`, the figure the buyer was shown. Never a price the server trusts.
+ */
+interface StoreBundleCheckoutEntry {
+    items: Array<{
+        productSlug: string;
+        quantity: number;
+    }>;
+    /** The total the cart showed for this selection, in minor units (`useCartBundlePrice`'s `totalMinor`). */
+    expectedTotalMinor: number;
 }
 /** Fields both doors take. Every site value is a parameter: nothing here has a default. */
 interface StartCheckoutShared {
@@ -83,6 +100,12 @@ interface StartCartCheckoutInput extends StartCheckoutShared {
     door: 'cart';
     customer: CheckoutCustomer;
     items: CartDoorItem[];
+    /**
+     * Edited store-bundle selections (v1.11.0), already removed from `items` by `toStoreBundlesCheckoutFragment`. Absent or
+     * empty sends nothing, so every cart without one keeps today's body bytes. Needs a dashboard that carries the
+     * store-bundle checkout: an older one ignores the field and would charge nothing for those lines.
+     */
+    storeBundles?: StoreBundleCheckoutEntry[];
     language?: string;
     marketingConsent?: boolean;
     /** Sent only when greater than 1. */
@@ -217,6 +240,7 @@ declare function buildCartDoorBody(input: StartCartCheckoutInput): {
         occurrenceId?: string;
         addonProductIds?: string[];
     }[];
+    storeBundles: StoreBundleCheckoutEntry[] | undefined;
     couponCode: string | undefined;
     couponCodes: string[] | undefined;
     language: string | undefined;
@@ -279,9 +303,11 @@ declare class CheckoutError extends Error {
         code: string;
         discount: number;
     }>;
-    constructor(key: CheckoutErrorKey, status: number, items?: string[], coupon?: CheckoutCouponRefusal);
+    /** `bundle_price_changed` only: the selection's current server total, in minor units, so the site can re-show the price. */
+    readonly totalMinor?: number;
+    constructor(key: CheckoutErrorKey, status: number, items?: string[], coupon?: CheckoutCouponRefusal, totalMinor?: number);
 }
 /** Maps an error body `{ code }` and the HTTP status to a stable key. Unknown codes are `generic`. */
 declare function checkoutErrorKey(status: number, code: unknown): CheckoutErrorKey;
 
-export { CHECKOUT_ERROR_KEYS, type CartDoorItem, type CheckoutCapabilities, type CheckoutCustomer, CheckoutError, type CheckoutErrorKey, type CheckoutNext, type CheckoutTotals, type CheckoutV2Response, type InstallmentRule, type OrderFull, type OrderItemThin, type OrderThin, type StartCartCheckoutInput, type StartCheckoutInput, type StartCheckoutResult, type StartFunnelCheckoutInput, type ThankYouResult, type ThankYouState, buildCartDoorBody, buildFunnelDoorBody, checkoutErrorKey, getCheckoutCapabilities, isCheckoutError, maxInstallmentsFor };
+export { CHECKOUT_ERROR_KEYS, type CartDoorItem, type CheckoutCapabilities, type CheckoutCustomer, CheckoutError, type CheckoutErrorKey, type CheckoutNext, type CheckoutTotals, type CheckoutV2Response, type InstallmentRule, type OrderFull, type OrderItemThin, type OrderThin, type StartCartCheckoutInput, type StartCheckoutInput, type StartCheckoutResult, type StartFunnelCheckoutInput, type StoreBundleCheckoutEntry, type ThankYouResult, type ThankYouState, buildCartDoorBody, buildFunnelDoorBody, checkoutErrorKey, getCheckoutCapabilities, isCheckoutError, maxInstallmentsFor };
