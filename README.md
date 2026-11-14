@@ -677,6 +677,7 @@ import { CookieConsentProvider, useConsent, useCookieSettingsLink, useConsentScr
 Headless, like the rest of the consent entry: the package decides, the site draws the map or its "Show map" face.
 
 - `config.embeds?: 'europe_ask' | 'always_load'` (type `EmbedsMode`, guard `isEmbedsMode`). Absent or any unknown value = `europe_ask`.
+- The consent entry is a `"use client"` module, so server code (a layout's config fetch) may import only its TYPES; check the two `embeds` values inline there instead of calling `isEmbedsMode`.
 - `embedAskFirst(embeds, country): boolean` (pure): `always_load` is false; otherwise true for a European visitor and for an unknown country, false for Israel and the rest of the world.
 - `useEmbedConsent(editing: boolean): 'load' | 'ask' | 'pending'`:
   - `editing === true` is `'load'`. Pass the template's own `useIsEditing()`. The package never tests for a frame or /preview in this decision.
