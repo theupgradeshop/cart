@@ -1,10 +1,14 @@
 // Pure consent logic (no React, no window access at import time): regions, storage, effective choices, cookies.
 // Spec websites-cookie-consent DRAFT 2, decisions D1-D7.
 
+import { isPreviewPath } from '../preview-path';
+
 export type ConsentCategory = 'analytics' | 'marketing';
 export type ConsentMode = 'ask' | 'notice';
 export type RegionGroup = 'europe' | 'israel' | 'rest';
 export type ConsentChoices = Record<ConsentCategory, boolean>;
+/** Third-party embeds (Google Maps): ask first for visitors from Europe (default), or load right away everywhere. */
+export type EmbedsMode = 'europe_ask' | 'always_load';
 
 export const CATEGORIES: readonly ConsentCategory[] = ['analytics', 'marketing'];
 
@@ -16,6 +20,8 @@ export interface ConsentConfig {
   categoriesInUse: ConsentCategory[];
   googleAnalyticsId?: string | null;
   metaPixelId?: string | null;
+  /** Embeds setting from the snapshot. Absent (or any unknown value) = 'europe_ask'. */
+  embeds?: EmbedsMode;
 }
 
 export interface StoredConsent {
@@ -47,6 +53,21 @@ export function regionGroupOf(country: string | null | undefined): RegionGroup |
 export function resolveMode(country: string | null | undefined, config: ConsentConfig): ConsentMode {
   const group = regionGroupOf(country);
   return group ? config.regions[group] : 'ask';
+}
+
+/** Type guard for the embeds setting. */
+export function isEmbedsMode(value: unknown): value is EmbedsMode {
+  return value === 'europe_ask' || value === 'always_load';
+}
+
+/**
+ * True when an embed must wait for the visitor's yes. `always_load` -> false. Otherwise (`europe_ask`, absent or an
+ * unknown value) -> true for a European visitor AND for an unknown country (fail-safe), false for Israel and the rest.
+ */
+export function embedAskFirst(embeds: EmbedsMode | null | undefined, country: string | null | undefined): boolean {
+  if (embeds === 'always_load') return false;
+  const group = regionGroupOf(country);
+  return group === null || group === 'europe';
 }
 
 export function inUse(config: ConsentConfig): ConsentCategory[] {
@@ -202,7 +223,7 @@ export const pageActions = {
 /** The page editor shows the site in an iframe and /preview is editor chrome, not a visit: nothing renders or loads. */
 export function isEmbeddedOrPreview(): boolean {
   if (typeof window === 'undefined') return true;
-  if (window.location.pathname.startsWith('/preview')) return true;
+  if (isPreviewPath(window.location.pathname)) return true;
   try {
     return window.self !== window.top;
   } catch {

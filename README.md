@@ -632,10 +632,10 @@ import { CookieConsentProvider, useConsent, useCookieSettingsLink, useConsentScr
 >
 ```
 
-`config` = `{ regions: { europe, israel, rest }: 'ask' | 'notice', privacyPath, categoriesInUse: ('analytics' | 'marketing')[], googleAnalyticsId?, metaPixelId? }`
+`config` = `{ regions: { europe, israel, rest }: 'ask' | 'notice', privacyPath, categoriesInUse: ('analytics' | 'marketing')[], googleAnalyticsId?, metaPixelId?, embeds? }`
 (the dashboard `website-config` `cookieConsent` block plus the GA and pixel ids).
 
-`useConsent()` returns `{ ready, active, mode: 'ask' | 'notice', categories, choices, bannerOpen, settingsOpen, privacyPath, gpc, country, isUS, acceptAll, declineAll, save(choices), openSettings, closeSettings }`.
+`useConsent()` returns `{ ready, active, mode: 'ask' | 'notice', categories, choices, bannerOpen, settingsOpen, privacyPath, gpc, country, isUS, embeds, acceptAll, declineAll, save(choices), openSettings, closeSettings }`.
 `categories` are the categories that have a tool in use: draw one switch each. `choices` is what may run right now.
 `useCookieSettingsLink()` returns `{ visible, open, isUS }` for the footer link (no markup; `visible` is false where there is no banner; `isUS` says which label to draw).
 `useConsentScripts(items)` injects the public site scripts (`{ placement, content, category }`; placement `head`, `body_start` or `body_end`, the camelCase `bodyStart`/`bodyEnd` also accepted; an item without `id` is keyed by a hash of placement + content, so it injects once per page) whose category is allowed
@@ -671,6 +671,23 @@ import { CookieConsentProvider, useConsent, useCookieSettingsLink, useConsentScr
 - **Notice mode:** a short notice that says plainly what is measured, an OK button, and a **Cookie settings control that is a real, visible button or link at least the size of the notice text** (not an icon, not smaller text). No Decline button.
 - **Words.** Ask, Notice and per-category words are the site's own site words in every language it serves; never reuse the Ask words for a Notice banner.
 - **`storageKey` and `legacyAcceptedMeans` are set per site** from what its old banner stored and asked: template and howhippie = `['marketing']` (pixel only); Camoflash, HIC and bomdia.upgradeu.ai = `['analytics', 'marketing']`; honeydew and new Bomdia are confirmed by their seats from their live banner words.
+
+### Embeds: Google Maps ask-first decision (`useEmbedConsent`, v1.12.0)
+
+Headless, like the rest of the consent entry: the package decides, the site draws the map or its "Show map" face.
+
+- `config.embeds?: 'europe_ask' | 'always_load'` (type `EmbedsMode`, guard `isEmbedsMode`). Absent or any unknown value = `europe_ask`.
+- `embedAskFirst(embeds, country): boolean` (pure): `always_load` is false; otherwise true for a European visitor and for an unknown country, false for Israel and the rest of the world.
+- `useEmbedConsent(editing: boolean): 'load' | 'ask' | 'pending'`:
+  - `editing === true` is `'load'`. Pass the template's own `useIsEditing()`. The package never tests for a frame or /preview in this decision.
+  - Outside a `CookieConsentProvider` it is `'ask'`.
+  - Inside, on the server, before mount, or while the country is not resolved it is `'pending'`. A site framed by a foreign page never resolves its country, so it stays `'pending'`: draw the same face as `'ask'`, without the "loads only when you click" line.
+  - Once the country is resolved it is `'ask'` or `'load'` from `embedAskFirst`.
+- It works with no banner on the site (no category in use). `useConsent()` also returns `embeds`; nothing else about the banner changed.
+
+```tsx
+const state = useEmbedConsent(useIsEditing()); // 'load' draws the iframe; 'ask' / 'pending' draw the face
+```
 
 ## Development
 

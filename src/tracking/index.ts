@@ -2,6 +2,8 @@
 // Plain browser code: no React, no 'use client' banner. `window` is touched only when a function is called.
 // Fail closed: nothing is sent until a site calls configureTracking({ hasConsent }).
 
+import { isPreviewPath } from '../preview-path';
+
 export interface TrackingConfig {
   /** The site's own cookie-consent check (e.g. its hasAnalyticsConsent). */
   hasConsent: () => boolean;
@@ -90,7 +92,7 @@ function blockedByGuard(): boolean {
     return true; // cross-origin top: we are in a frame
   }
   const path = window.location?.pathname ?? '';
-  return path.startsWith('/preview');
+  return isPreviewPath(path);
 }
 
 function readFired(): string[] {

@@ -27,6 +27,13 @@ __export(index_exports, {
   trackPurchase: () => trackPurchase
 });
 module.exports = __toCommonJS(index_exports);
+
+// src/preview-path.ts
+function isPreviewPath(path) {
+  return path === "/preview" || path.startsWith("/preview/");
+}
+
+// src/tracking/index.ts
 var WAIT_MAX_MS = 60 * 60 * 1e3;
 var FAST_POLL_MS = 250;
 var FAST_POLL_WINDOW_MS = 1e4;
@@ -71,7 +78,7 @@ function blockedByGuard() {
     return true;
   }
   const path = window.location?.pathname ?? "";
-  return path.startsWith("/preview");
+  return isPreviewPath(path);
 }
 function readFired() {
   try {

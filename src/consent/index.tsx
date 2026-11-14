@@ -10,6 +10,7 @@ import {
   bannerNeeded,
   clearCategoryCookies,
   effectiveChoices,
+  embedAskFirst,
   explicitlyDeclined,
   fetchCountry,
   gpcSignal,
@@ -24,6 +25,7 @@ import {
   type ConsentChoices,
   type ConsentConfig,
   type ConsentMode,
+  type EmbedsMode,
   type StoredConsent,
 } from './logic';
 import {
@@ -90,6 +92,8 @@ export interface ConsentState {
   country: string | null;
   /** The visitor is in the US (resolved country `US`): the settings control reads "Do not sell or share my info". */
   isUS: boolean;
+  /** The embeds setting from the snapshot (absent = 'europe_ask'). Read by `useEmbedConsent`. */
+  embeds: EmbedsMode;
   acceptAll: () => void;
   declineAll: () => void;
   save: (choices: Partial<ConsentChoices>) => void;
@@ -110,6 +114,7 @@ const INERT: ConsentState = {
   gpc: false,
   country: null,
   isUS: false,
+  embeds: 'europe_ask',
   acceptAll: () => {},
   declineAll: () => {},
   save: () => {},
@@ -127,6 +132,21 @@ export function useConsent(): ConsentState {
 export function useCookieSettingsLink(): { visible: boolean; open: () => void; isUS: boolean } {
   const c = useConsent();
   return { visible: c.active && c.ready, open: c.openSettings, isUS: c.isUS };
+}
+
+/**
+ * What a third-party embed (Google Maps) may do right now: 'load' (draw it), 'ask' (draw the face and wait for a click)
+ * or 'pending' (same face; the visitor's country is not known yet). `editing` is the caller's own editing flag (the
+ * template's `useIsEditing()`): true -> 'load'. The package never tests for a frame or /preview here. Outside a
+ * CookieConsentProvider -> 'ask'. Server render, before mount, and a site framed by a foreign page (which never
+ * resolves a country) stay 'pending'; once the country is resolved -> `embedAskFirst(embeds, country)`.
+ */
+export function useEmbedConsent(editing: boolean): 'load' | 'ask' | 'pending' {
+  const ctx = useContext(ConsentContext);
+  if (editing) return 'load';
+  if (!ctx) return 'ask';
+  if (!ctx.ready) return 'pending';
+  return embedAskFirst(ctx.embeds, ctx.country) ? 'ask' : 'load';
 }
 
 let warnedNoticeWords = false;
@@ -283,13 +303,14 @@ export function CookieConsentProvider(props: CookieConsentProviderProps) {
       gpc,
       country: geo.done ? geo.country : null,
       isUS: geo.done && isUSCountry(geo.country),
+      embeds: config.embeds === 'always_load' ? 'always_load' : 'europe_ask',
       acceptAll,
       declineAll,
       save,
       openSettings,
       closeSettings,
     }),
-    [ready, active, mode, used, choices, bannerOpen, settingsOpen, config.privacyPath, gpc, geo, acceptAll, declineAll, save, openSettings, closeSettings],
+    [ready, active, mode, used, choices, bannerOpen, settingsOpen, config.privacyPath, config.embeds, gpc, geo, acceptAll, declineAll, save, openSettings, closeSettings],
   );
 
   return createElement(ConsentContext.Provider, { value }, children);

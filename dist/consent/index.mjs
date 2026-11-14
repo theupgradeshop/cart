@@ -5,6 +5,11 @@
 import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { configureTracking } from "@upgradeshop/cart/tracking";
 
+// src/preview-path.ts
+function isPreviewPath(path) {
+  return path === "/preview" || path.startsWith("/preview/");
+}
+
 // src/consent/logic.ts
 var CATEGORIES = ["analytics", "marketing"];
 var EU27 = [
@@ -48,6 +53,14 @@ function regionGroupOf(country) {
 function resolveMode(country, config) {
   const group = regionGroupOf(country);
   return group ? config.regions[group] : "ask";
+}
+function isEmbedsMode(value) {
+  return value === "europe_ask" || value === "always_load";
+}
+function embedAskFirst(embeds, country) {
+  if (embeds === "always_load") return false;
+  const group = regionGroupOf(country);
+  return group === null || group === "europe";
 }
 function inUse(config) {
   return CATEGORIES.filter((c) => config.categoriesInUse.includes(c));
@@ -155,7 +168,7 @@ var pageActions = {
 };
 function isEmbeddedOrPreview() {
   if (typeof window === "undefined") return true;
-  if (window.location.pathname.startsWith("/preview")) return true;
+  if (isPreviewPath(window.location.pathname)) return true;
   try {
     return window.self !== window.top;
   } catch {
@@ -400,6 +413,7 @@ var INERT = {
   gpc: false,
   country: null,
   isUS: false,
+  embeds: "europe_ask",
   acceptAll: () => {
   },
   declineAll: () => {
@@ -418,6 +432,13 @@ function useConsent() {
 function useCookieSettingsLink() {
   const c = useConsent();
   return { visible: c.active && c.ready, open: c.openSettings, isUS: c.isUS };
+}
+function useEmbedConsent(editing) {
+  const ctx = useContext(ConsentContext);
+  if (editing) return "load";
+  if (!ctx) return "ask";
+  if (!ctx.ready) return "pending";
+  return embedAskFirst(ctx.embeds, ctx.country) ? "ask" : "load";
 }
 var warnedNoticeWords = false;
 function CookieConsentProvider(props) {
@@ -548,13 +569,14 @@ function CookieConsentProvider(props) {
       gpc,
       country: geo.done ? geo.country : null,
       isUS: geo.done && isUSCountry(geo.country),
+      embeds: config.embeds === "always_load" ? "always_load" : "europe_ask",
       acceptAll,
       declineAll,
       save,
       openSettings,
       closeSettings
     }),
-    [ready, active, mode, used, choices, bannerOpen, settingsOpen, config.privacyPath, gpc, geo, acceptAll, declineAll, save, openSettings, closeSettings]
+    [ready, active, mode, used, choices, bannerOpen, settingsOpen, config.privacyPath, config.embeds, gpc, geo, acceptAll, declineAll, save, openSettings, closeSettings]
   );
   return createElement(ConsentContext.Provider, { value }, children);
 }
@@ -607,12 +629,14 @@ export {
   consentToolsLoaded,
   cookieDomainCandidates,
   effectiveChoices,
+  embedAskFirst,
   explicitlyDeclined,
   fetchCountry,
   gpcSignal,
   inUse,
   injectConsentScripts,
   isEmbeddedOrPreview,
+  isEmbedsMode,
   isUSCountry,
   loadGoogleAnalytics,
   loadMetaPixel,
@@ -626,5 +650,6 @@ export {
   useConsent,
   useConsentScripts,
   useCookieSettingsLink,
+  useEmbedConsent,
   writeStored
 };

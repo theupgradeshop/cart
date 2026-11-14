@@ -5,6 +5,8 @@ type ConsentCategory = 'analytics' | 'marketing';
 type ConsentMode = 'ask' | 'notice';
 type RegionGroup = 'europe' | 'israel' | 'rest';
 type ConsentChoices = Record<ConsentCategory, boolean>;
+/** Third-party embeds (Google Maps): ask first for visitors from Europe (default), or load right away everywhere. */
+type EmbedsMode = 'europe_ask' | 'always_load';
 declare const CATEGORIES: readonly ConsentCategory[];
 interface ConsentConfig {
     /** The owner's mode per region group (server snapshot, dashboard website-config). */
@@ -14,6 +16,8 @@ interface ConsentConfig {
     categoriesInUse: ConsentCategory[];
     googleAnalyticsId?: string | null;
     metaPixelId?: string | null;
+    /** Embeds setting from the snapshot. Absent (or any unknown value) = 'europe_ask'. */
+    embeds?: EmbedsMode;
 }
 interface StoredConsent {
     mode: ConsentMode;
@@ -26,6 +30,13 @@ interface StoredConsent {
 declare function regionGroupOf(country: string | null | undefined): RegionGroup | null;
 /** The mode for a visitor: an unknown country is ALWAYS ask first, in code, not editable. */
 declare function resolveMode(country: string | null | undefined, config: ConsentConfig): ConsentMode;
+/** Type guard for the embeds setting. */
+declare function isEmbedsMode(value: unknown): value is EmbedsMode;
+/**
+ * True when an embed must wait for the visitor's yes. `always_load` -> false. Otherwise (`europe_ask`, absent or an
+ * unknown value) -> true for a European visitor AND for an unknown country (fail-safe), false for Israel and the rest.
+ */
+declare function embedAskFirst(embeds: EmbedsMode | null | undefined, country: string | null | undefined): boolean;
 declare function inUse(config: ConsentConfig): ConsentCategory[];
 /**
  * Reads the stored choice. Old string values migrate: "accepted" -> each category in `legacyAcceptedMeans` on, the
@@ -136,6 +147,8 @@ interface ConsentState {
     country: string | null;
     /** The visitor is in the US (resolved country `US`): the settings control reads "Do not sell or share my info". */
     isUS: boolean;
+    /** The embeds setting from the snapshot (absent = 'europe_ask'). Read by `useEmbedConsent`. */
+    embeds: EmbedsMode;
     acceptAll: () => void;
     declineAll: () => void;
     save: (choices: Partial<ConsentChoices>) => void;
@@ -149,6 +162,14 @@ declare function useCookieSettingsLink(): {
     open: () => void;
     isUS: boolean;
 };
+/**
+ * What a third-party embed (Google Maps) may do right now: 'load' (draw it), 'ask' (draw the face and wait for a click)
+ * or 'pending' (same face; the visitor's country is not known yet). `editing` is the caller's own editing flag (the
+ * template's `useIsEditing()`): true -> 'load'. The package never tests for a frame or /preview here. Outside a
+ * CookieConsentProvider -> 'ask'. Server render, before mount, and a site framed by a foreign page (which never
+ * resolves a country) stay 'pending'; once the country is resolved -> `embedAskFirst(embeds, country)`.
+ */
+declare function useEmbedConsent(editing: boolean): 'load' | 'ask' | 'pending';
 declare function CookieConsentProvider(props: CookieConsentProviderProps): react.FunctionComponentElement<react.ProviderProps<ConsentState | null>>;
 /**
  * Injects the public site scripts (`/api/public/scripts` items with `{ placement, content, category }`) whose
@@ -157,4 +178,4 @@ declare function CookieConsentProvider(props: CookieConsentProviderProps): react
  */
 declare function useConsentScripts(items: ConsentScriptItem[] | null | undefined): void;
 
-export { CATEGORIES, CONSENT_CHANGE_EVENT, type ConsentCategory, type ConsentChoices, type ConsentConfig, type ConsentMode, type ConsentScriptItem, type ConsentState, CookieConsentProvider, type CookieConsentProviderProps, GEO_TIMEOUT_MS, type RegionGroup, type StoredConsent, bannerNeeded, clearCategoryCookies, consentToolsLoaded, cookieDomainCandidates, effectiveChoices, explicitlyDeclined, fetchCountry, gpcSignal, inUse, injectConsentScripts, isEmbeddedOrPreview, isUSCountry, loadGoogleAnalytics, loadMetaPixel, pageActions, readStored, regionGroupOf, resolveMode, scriptCategory, sendGaPageView, sendMetaPageView, useConsent, useConsentScripts, useCookieSettingsLink, writeStored };
+export { CATEGORIES, CONSENT_CHANGE_EVENT, type ConsentCategory, type ConsentChoices, type ConsentConfig, type ConsentMode, type ConsentScriptItem, type ConsentState, CookieConsentProvider, type CookieConsentProviderProps, type EmbedsMode, GEO_TIMEOUT_MS, type RegionGroup, type StoredConsent, bannerNeeded, clearCategoryCookies, consentToolsLoaded, cookieDomainCandidates, effectiveChoices, embedAskFirst, explicitlyDeclined, fetchCountry, gpcSignal, inUse, injectConsentScripts, isEmbeddedOrPreview, isEmbedsMode, isUSCountry, loadGoogleAnalytics, loadMetaPixel, pageActions, readStored, regionGroupOf, resolveMode, scriptCategory, sendGaPageView, sendMetaPageView, useConsent, useConsentScripts, useCookieSettingsLink, useEmbedConsent, writeStored };
