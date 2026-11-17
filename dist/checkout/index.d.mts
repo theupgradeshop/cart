@@ -60,6 +60,24 @@ interface CheckoutCustomer {
     phone?: string;
     company?: string;
 }
+/** One visit's marketing touch (UTM attribution, spec decision 1). Every key is optional text; the package validates nothing beyond "plain object". */
+interface Touch {
+    utm_source?: string;
+    utm_medium?: string;
+    utm_campaign?: string;
+    utm_content?: string;
+    utm_term?: string;
+    gclid?: string;
+    fbclid?: string;
+    landing_path?: string;
+    referrer_host?: string;
+    at?: string;
+}
+/** First and last touch of the buyer, as the site captured them. Either side is null when none was captured. */
+interface Attribution {
+    first: Touch | null;
+    last: Touch | null;
+}
 interface CartDoorItem {
     productSlug: string;
     quantity: number;
@@ -117,6 +135,8 @@ interface StartCartCheckoutInput extends StartCheckoutShared {
     marketingConsent?: boolean;
     /** Sent only when greater than 1. */
     selectedInstallments?: number;
+    /** First/last marketing touch. Cart door only; sent as `attribution` when a plain object, absent otherwise (body bytes unchanged). */
+    attribution?: Attribution;
 }
 interface StartFunnelCheckoutInput extends StartCheckoutShared {
     door: 'funnel';
@@ -417,6 +437,7 @@ declare function buildCartDoorBody(input: StartCartCheckoutInput): {
     selectedInstallments: number | undefined;
     successUrl: string;
     cancelUrl: string;
+    attribution: Attribution | undefined;
 };
 /** POST body for the funnels door (`/api/public/funnels/checkout`, contract 2). */
 declare function buildFunnelDoorBody(input: StartFunnelCheckoutInput): {
@@ -491,4 +512,4 @@ declare function maxInstallmentsFor(total: number, capabilities: Pick<CheckoutCa
     installmentRules?: InstallmentRule[];
 }): number;
 
-export { type AppliedCoupon, CHECKOUT_ERROR_KEYS, type CartDoorItem, type CheckoutCapabilities, type CheckoutCustomer, CheckoutError, type CheckoutErrorKey, type CheckoutNext, type CheckoutTotals, type CheckoutV2Response, type CouponValidation, type GetOrderForThankYouOptions, type InstallmentRule, type LinkCouponLine, MAX_COUPON_CODES, type OrderFull, type OrderItemThin, type OrderThin, POLL_INTERVAL_MS, POLL_MAX_REQUESTS, SLOW_WATCH_GAPS_MS, type StartCartCheckoutInput, type StartCheckoutInput, type StartCheckoutResult, type StartFunnelCheckoutInput, type StoreBundleCheckoutEntry, TERMINAL_FINANCIAL_STATUSES, type ThankYouResult, type ThankYouState, type UseLinkCouponOptions, type UseThankYouOrderOptions, type UseThankYouOrderResult, type WatchOrderForThankYouOptions, buildCartDoorBody, buildCouponValidateBody, buildFunnelDoorBody, checkoutErrorKey, getOrderForThankYou, isCheckoutError, maxInstallmentsFor, parseCouponValidation, startCheckout, useLinkCoupon, useThankYouOrder, watchOrderForThankYou };
+export { type AppliedCoupon, type Attribution, CHECKOUT_ERROR_KEYS, type CartDoorItem, type CheckoutCapabilities, type CheckoutCustomer, CheckoutError, type CheckoutErrorKey, type CheckoutNext, type CheckoutTotals, type CheckoutV2Response, type CouponValidation, type GetOrderForThankYouOptions, type InstallmentRule, type LinkCouponLine, MAX_COUPON_CODES, type OrderFull, type OrderItemThin, type OrderThin, POLL_INTERVAL_MS, POLL_MAX_REQUESTS, SLOW_WATCH_GAPS_MS, type StartCartCheckoutInput, type StartCheckoutInput, type StartCheckoutResult, type StartFunnelCheckoutInput, type StoreBundleCheckoutEntry, TERMINAL_FINANCIAL_STATUSES, type ThankYouResult, type ThankYouState, type Touch, type UseLinkCouponOptions, type UseThankYouOrderOptions, type UseThankYouOrderResult, type WatchOrderForThankYouOptions, buildCartDoorBody, buildCouponValidateBody, buildFunnelDoorBody, checkoutErrorKey, getOrderForThankYou, isCheckoutError, maxInstallmentsFor, parseCouponValidation, startCheckout, useLinkCoupon, useThankYouOrder, watchOrderForThankYou };

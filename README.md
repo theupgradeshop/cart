@@ -274,6 +274,18 @@ dashboard ignores the unknown `storeBundles` field, and the composed lines were 
 lines go uncharged (the order holds only the loose lines), and a composed-only cart arrives with empty `items` and is refused
 with `cart_empty`. So the dashboard must ship first.
 
+## Unreleased: attribution on the cart door
+
+`StartCartCheckoutInput.attribution?: Attribution` (`{ first: Touch | null; last: Touch | null }`; `Touch` keys, all optional
+strings: `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `gclid`, `fbclid`, `landing_path`,
+`referrer_host`, `at`) is sent as `attribution` in the cart-door body when it is a plain object; absent, null, an array or
+a primitive sends nothing. The body carries a fresh copy, never the caller's object: only the 10 `Touch` keys survive, only
+string values, each cut to 200 characters; a touch that is not a plain object becomes `null`, and extra keys and nested
+objects are dropped. A cyclic object, a BigInt or a throwing getter cannot break the checkout: the key is left out. The
+dashboard sanitizes again on receipt, so every existing body keeps its bytes. The funnel door is unchanged (it keeps `utms`). Types
+`Touch` and `Attribution` are exported from `/checkout` and `/checkout/server`. The dashboard must accept the field before a
+site sends it. No version bump yet.
+
 ## Course bundle pricing engine (U3, courses-bundles storefront spec)
 
 `src/bundle-engine.ts` is a pure, framework-free client mirror of the

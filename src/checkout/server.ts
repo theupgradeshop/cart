@@ -11,6 +11,8 @@ export type {
   CheckoutCustomer,
   CartDoorItem,
   StoreBundleCheckoutEntry,
+  Touch,
+  Attribution,
   StartCartCheckoutInput,
   StartFunnelCheckoutInput,
   StartCheckoutInput,

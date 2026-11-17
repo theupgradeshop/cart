@@ -9,6 +9,41 @@ function compact(obj2) {
 function manyCodes(codes) {
   return Array.isArray(codes) && codes.length >= 2 ? codes : void 0;
 }
+var TOUCH_KEYS = [
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_content",
+  "utm_term",
+  "gclid",
+  "fbclid",
+  "landing_path",
+  "referrer_host",
+  "at"
+];
+var TOUCH_VALUE_MAX = 200;
+function isPlain(v) {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+function copyTouch(t) {
+  if (!isPlain(t)) return null;
+  const out = {};
+  for (const k of TOUCH_KEYS) {
+    const v = t[k];
+    if (typeof v === "string") out[k] = v.slice(0, TOUCH_VALUE_MAX);
+  }
+  return out;
+}
+function safeAttribution(a) {
+  try {
+    if (!isPlain(a)) return void 0;
+    return { first: copyTouch(a.first), last: copyTouch(a.last) };
+  } catch {
+    return void 0;
+  }
+}
 function buildCartDoorBody(input) {
   const n = input.selectedInstallments;
   return compact({
@@ -24,7 +59,8 @@ function buildCartDoorBody(input) {
     shipping_address: input.shippingAddress,
     selectedInstallments: typeof n === "number" && Number.isInteger(n) && n > 1 ? n : void 0,
     successUrl: input.successUrl,
-    cancelUrl: input.cancelUrl
+    cancelUrl: input.cancelUrl,
+    attribution: safeAttribution(input.attribution)
   });
 }
 function buildFunnelDoorBody(input) {

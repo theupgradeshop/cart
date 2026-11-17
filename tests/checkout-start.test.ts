@@ -57,6 +57,24 @@ describe('startCheckout', () => {
     expect(readOwnershipToken(noneResponse.orderId)).toBe(OWNERSHIP_TOKEN);
   });
 
+  it('attribution: in the fetch body when given, absent when not; a hostile object still proceeds', async () => {
+    const f = reply(200, payResponse);
+    vi.stubGlobal('fetch', f);
+    const attribution = { first: { utm_source: 'google' }, last: null };
+    await startCheckout(cartInput({ attribution }));
+    expect(JSON.parse((f.mock.calls[0][1] as { body: string }).body).attribution).toEqual(attribution);
+    const f2 = reply(200, payResponse);
+    vi.stubGlobal('fetch', f2);
+    await startCheckout(cartInput());
+    expect('attribution' in JSON.parse((f2.mock.calls[0][1] as { body: string }).body)).toBe(false);
+    const cyc: Record<string, unknown> = {};
+    cyc.self = cyc;
+    const f3 = reply(200, payResponse);
+    vi.stubGlobal('fetch', f3);
+    await expect(startCheckout(cartInput({ attribution: { first: cyc, last: null } as never }))).resolves.toBeDefined();
+    expect(f3).toHaveBeenCalledTimes(1);
+  });
+
   it('cart door request: contract 2, endpoint, body keys, no installments by default', async () => {
     const f = reply(200, payResponse);
     vi.stubGlobal('fetch', f);
